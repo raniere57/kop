@@ -38,6 +38,18 @@ O DMG gerado inclui:
 - `Kop.app`
 - atalho para `/Applications` para instalacao por drag and drop
 
+## Instalar localmente
+
+Se quiser testar o app aparecendo no Spotlight e no Launchpad, ele precisa estar em `/Applications`.
+Depois de gerar o build Release em `dist/Kop.app`, rode:
+
+```sh
+chmod +x Scripts/install_app.sh
+./Scripts/install_app.sh
+```
+
+Isso copia o app para `/Applications/Kop.app`, registra no Launch Services e dispara reimportacao no Spotlight.
+
 ## Permissoes
 
 - Clipboard: acesso via `NSPasteboard`
