@@ -32,6 +32,8 @@ Saida esperada:
 
 - App Release em `.derived/Build/Products/Release/Kop.app`
 - DMG final em `dist/Kop.dmg`
+- DMG aberto automaticamente no Finder
+- Janela pronta para arrastar `Kop.app` para `Applications`
 
 O DMG gerado inclui:
 
@@ -40,15 +42,23 @@ O DMG gerado inclui:
 
 ## Instalar localmente
 
-Se quiser testar o app aparecendo no Spotlight e no Launchpad, ele precisa estar em `/Applications`.
-Depois de gerar o build Release em `dist/Kop.app`, rode:
+Para o Kop aparecer no Spotlight e no Launchpad, ele precisa estar instalado em `/Applications`.
+So o build em `.derived` ou `dist/` nao entra na gaveta de apps do macOS.
+
+Fluxo recomendado:
+
+1. Rode `./Scripts/create_dmg.sh`
+2. Quando o DMG abrir, arraste `Kop.app` para `Applications`
+3. Abra o app uma vez
+
+Se quiser automatizar a copia para `/Applications` em vez de arrastar manualmente, depois de gerar o build Release em `dist/Kop.app`, rode:
 
 ```sh
 chmod +x Scripts/install_app.sh
 ./Scripts/install_app.sh
 ```
 
-Isso copia o app para `/Applications/Kop.app`, registra no Launch Services e dispara reimportacao no Spotlight.
+Isso copia o app para `/Applications/Kop.app`, registra no Launch Services, reimporta no Spotlight, reinicia o Dock e abre o Kop uma vez.
 
 ## Permissoes
 
@@ -58,7 +68,8 @@ Isso copia o app para `/Applications/Kop.app`, registra no Launch Services e dis
 
 ## Distribuicao fora da App Store
 
-- O target usa `LSUIElement = YES`, entao o app roda sem icone no Dock.
+- O bundle e distribuido como app macOS normal para aparecer no Spotlight e no Launchpad.
+- Em execucao, o Kop continua se comportando como menu bar app porque usa `NSApp.setActivationPolicy(.accessory)`.
 - O sandbox deve permanecer desativado para que o comportamento global do clipboard funcione sem restricoes.
 - Assine o app com um certificado `Developer ID Application`.
 - Gere um `.app` assinado e, se for distribuir para terceiros, notarize o binario antes de montar o `.dmg`.

@@ -21,9 +21,16 @@ echo "Registering with Launch Services..."
 echo "Refreshing Spotlight metadata..."
 mdimport "$TARGET_PATH" || true
 
+echo "Rebuilding Launch Services registration..."
+/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -kill -r -domain local -domain system -domain user || true
+
+echo "Resetting Launchpad and restarting Dock..."
+defaults write com.apple.dock ResetLaunchPad -bool true || true
+killall Dock || true
+
+echo "Opening app once..."
+open "$TARGET_PATH" || true
+
 echo
 echo "Installed at:"
 echo "  $TARGET_PATH"
-echo
-echo "If Launchpad still does not show it immediately, log out and back in or relaunch the Dock:"
-echo "  killall Dock"

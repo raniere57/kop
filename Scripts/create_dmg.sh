@@ -54,3 +54,7 @@ rm -rf "$STAGING_DIR"
 echo
 echo "DMG created at:"
 echo "  $DMG_PATH"
+
+echo
+echo "Opening DMG..."
+open "$DMG_PATH"
