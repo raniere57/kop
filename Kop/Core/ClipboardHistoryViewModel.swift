@@ -76,40 +76,45 @@ final class ClipboardHistoryViewModel: ObservableObject {
     func activateSelectedItem() {
         guard let selected = selectedItem else { return }
         copy(item: selected, plainTextOnly: false, autoPaste: false)
-        NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
     }
 
     func copy(item: ClipboardEntry, plainTextOnly: Bool, autoPaste: Bool) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
+        NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
 
-        switch item.type {
-        case .plainText, .fileURL, .pdf:
-            if let text = item.textContent ?? item.filePath {
-                pasteboard.setString(text, forType: .string)
-            } else if let data = item.binaryData {
-                pasteboard.setData(data, forType: .pdf)
-            }
-        case .richText:
-            if plainTextOnly {
-                pasteboard.setString(item.textContent ?? "", forType: .string)
-            } else if let richTextData = item.richTextData {
-                pasteboard.setData(richTextData, forType: .rtf)
-                if let textContent = item.textContent {
-                    pasteboard.setString(textContent, forType: .string)
+        DispatchQueue.main.async {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+
+            switch item.type {
+            case .plainText, .fileURL, .pdf:
+                if let text = item.textContent ?? item.filePath {
+                    pasteboard.setString(text, forType: .string)
+                } else if let data = item.binaryData {
+                    pasteboard.setData(data, forType: .pdf)
+                }
+            case .richText:
+                if plainTextOnly {
+                    pasteboard.setString(item.textContent ?? "", forType: .string)
+                } else if let richTextData = item.richTextData {
+                    pasteboard.setData(richTextData, forType: .rtf)
+                    if let textContent = item.textContent {
+                        pasteboard.setString(textContent, forType: .string)
+                    }
+                }
+            case .image:
+                if let data = item.binaryData {
+                    pasteboard.setData(data, forType: .png)
+                } else if let thumbnailPath = item.thumbnailPath,
+                          let data = try? Data(contentsOf: URL(fileURLWithPath: thumbnailPath)) {
+                    pasteboard.setData(data, forType: .png)
                 }
             }
-        case .image:
-            if let data = item.binaryData {
-                pasteboard.setData(data, forType: .png)
-            } else if let thumbnailPath = item.thumbnailPath,
-                      let data = try? Data(contentsOf: URL(fileURLWithPath: thumbnailPath)) {
-                pasteboard.setData(data, forType: .png)
-            }
-        }
 
-        if autoPaste {
-            PasteSimulator.simulatePaste()
+            if autoPaste {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    PasteSimulator.simulatePaste()
+                }
+            }
         }
     }
 

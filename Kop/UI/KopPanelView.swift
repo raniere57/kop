@@ -13,7 +13,10 @@ struct KopPanelView: View {
                 SearchBar(text: $viewModel.searchText)
                     .focused($searchFocused)
                 Button {
-                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    DispatchQueue.main.async {
+                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                    }
                 } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 15, weight: .medium))
@@ -35,12 +38,10 @@ struct KopPanelView: View {
                         .contextMenu {
                             Button("Copiar") {
                                 viewModel.copy(item: item, plainTextOnly: false, autoPaste: false)
-                                NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
                             }
                             if item.type == .richText {
                                 Button("Copiar como texto puro") {
                                     viewModel.copy(item: item, plainTextOnly: true, autoPaste: false)
-                                    NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
                                 }
                             }
                             if item.type == .fileURL, let path = item.filePath {
@@ -59,16 +60,11 @@ struct KopPanelView: View {
                             }
                             Button("Copiar e Colar") {
                                 viewModel.copy(item: item, plainTextOnly: false, autoPaste: true)
-                                NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
                             }
-                        }
-                        .onTapGesture(count: 2) {
-                            PreviewWindowController.shared.show(item: item)
                         }
                         .onTapGesture {
                             viewModel.selectedItemID = item.id
                             viewModel.copy(item: item, plainTextOnly: false, autoPaste: false)
-                            NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
                         }
                         .onAppear {
                             viewModel.loadMoreIfNeeded(currentItem: item)

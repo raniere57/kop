@@ -7,7 +7,7 @@ struct KopApp: App {
     var body: some Scene {
         Settings {
             PreferencesView(viewModel: appDelegate.preferencesViewModel)
-                .frame(width: 420, height: 280)
+                .frame(width: 420, height: 360)
         }
     }
 }

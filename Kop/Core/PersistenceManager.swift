@@ -1,6 +1,12 @@
 import Foundation
 import SQLite3
 
+struct StorageStats {
+    let totalItems: Int
+    let totalSizeBytes: Int64
+    let oldestItemDate: Date?
+}
+
 final class PersistenceManager {
     static let shared = PersistenceManager()
 
@@ -127,6 +133,51 @@ final class PersistenceManager {
     func clearNonFavoriteItems() {
         queue.sync {
             _ = sqlite3_exec(db, "DELETE FROM clipboard_items WHERE is_favorite = 0;", nil, nil, nil)
+        }
+    }
+
+    func fetchStorageStats() -> StorageStats {
+        queue.sync {
+            let sql = """
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(
+                    COALESCE(length(binary_data), 0) +
+                    COALESCE(length(rich_text_data), 0) +
+                    COALESCE(length(text_content), 0)
+                ), 0),
+                MIN(created_at)
+            FROM clipboard_items;
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                return StorageStats(totalItems: 0, totalSizeBytes: 0, oldestItemDate: nil)
+            }
+            defer { sqlite3_finalize(statement) }
+
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                return StorageStats(totalItems: 0, totalSizeBytes: 0, oldestItemDate: nil)
+            }
+
+            let payloadBytes = sqlite3_column_int64(statement, 1)
+            let dbSizeBytes = (try? FileManager.default.attributesOfItem(atPath: dbURL.path)[.size] as? Int64) ?? 0
+            let oldestTimestamp = sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 2)
+            return StorageStats(
+                totalItems: Int(sqlite3_column_int(statement, 0)),
+                totalSizeBytes: max(payloadBytes, dbSizeBytes),
+                oldestItemDate: oldestTimestamp.map(Date.init(timeIntervalSince1970:))
+            )
+        }
+    }
+
+    func deleteItemsOlderThan(_ date: Date) {
+        queue.sync {
+            let sql = "DELETE FROM clipboard_items WHERE is_favorite = 0 AND created_at < ?;"
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
+            sqlite3_step(statement)
         }
     }
 

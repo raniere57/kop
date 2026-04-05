@@ -100,22 +100,45 @@ final class ClipboardMonitor {
         let sourceBundleIdentifier = sourceApp?.bundleIdentifier
 
         if let fileURLString = item.string(forType: .fileURL),
-           preferences.captureFilesEnabled,
            let url = URL(string: fileURLString) {
             let path = url.path
-            let fingerprint = digest("\(ClipboardItemType.fileURL.rawValue):\(path)")
-            return ClipboardCapture(
-                type: .fileURL,
-                textContent: path,
-                richTextData: nil,
-                binaryData: nil,
-                filePath: path,
-                thumbnailPath: nil,
-                sourceAppName: sourceAppName,
-                sourceBundleIdentifier: sourceBundleIdentifier,
-                fingerprint: fingerprint,
-                createdAt: now
-            )
+            let imageExtensions = ["png", "jpg", "jpeg", "gif", "tiff", "tif", "heic", "webp", "bmp"]
+
+            if imageExtensions.contains(url.pathExtension.lowercased()),
+               preferences.captureImagesEnabled,
+               let imageData = try? Data(contentsOf: url) {
+                let imageStore = imageData.count > 10_000_000 ? nil : imageData
+                let thumbnailPath = ImageThumbnail.shared.persistThumbnail(for: imageData)
+                let fingerprint = digestData(prefix: ClipboardItemType.image.rawValue, data: imageData)
+                return ClipboardCapture(
+                    type: .image,
+                    textContent: path,
+                    richTextData: nil,
+                    binaryData: imageStore,
+                    filePath: path,
+                    thumbnailPath: thumbnailPath,
+                    sourceAppName: sourceAppName,
+                    sourceBundleIdentifier: sourceBundleIdentifier,
+                    fingerprint: fingerprint,
+                    createdAt: now
+                )
+            }
+
+            if preferences.captureFilesEnabled {
+                let fingerprint = digest("\(ClipboardItemType.fileURL.rawValue):\(path)")
+                return ClipboardCapture(
+                    type: .fileURL,
+                    textContent: path,
+                    richTextData: nil,
+                    binaryData: nil,
+                    filePath: path,
+                    thumbnailPath: nil,
+                    sourceAppName: sourceAppName,
+                    sourceBundleIdentifier: sourceBundleIdentifier,
+                    fingerprint: fingerprint,
+                    createdAt: now
+                )
+            }
         }
 
         if let pdfData = item.data(forType: .pdf) {

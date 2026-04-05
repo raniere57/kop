@@ -33,6 +33,11 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         panel.isOpaque = false
         panel.hasShadow = true
         panel.contentView = hosting
+        if let contentView = panel.contentView {
+            contentView.wantsLayer = true
+            contentView.layer?.cornerRadius = 12
+            contentView.layer?.masksToBounds = true
+        }
 
         super.init(window: panel)
         panel.delegate = self
@@ -61,6 +66,13 @@ final class PanelController: NSWindowController, NSWindowDelegate {
 
     @objc func closePanel() {
         window?.orderOut(nil)
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        if NSApp.keyWindow?.identifier?.rawValue == "preferencesWindow" {
+            return
+        }
+        closePanel()
     }
 
     private func showPanel() {
