@@ -30,9 +30,22 @@ fi
 
 cp -R "$APP_PATH" "$DIST_APP_PATH"
 
+echo "Registering app with Launch Services..."
+/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister \
+  -f "$DIST_APP_PATH" 2>/dev/null || true
+
 mkdir -p "$STAGING_DIR"
 cp -R "$DIST_APP_PATH" "$STAGING_DIR/"
 ln -s /Applications "$STAGING_DIR/Applications"
+cat > "$STAGING_DIR/Como Instalar.txt" << 'EOF'
+1. Arraste Kop.app para a pasta Applications
+2. Abra o Terminal e cole:
+   /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f /Applications/Kop.app
+3. Procure por "Kop" no Spotlight (Cmd+Space)
+
+O Kop e um menu bar app - ele NAO aparece na gaveta de apps (Launchpad),
+mas aparece no Spotlight e roda na barra de menus no topo da tela.
+EOF
 
 echo "Creating DMG..."
 if ! hdiutil create \

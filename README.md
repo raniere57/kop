@@ -42,14 +42,17 @@ O DMG gerado inclui:
 
 ## Instalar localmente
 
-Para o Kop aparecer no Spotlight e no Launchpad, ele precisa estar instalado em `/Applications`.
-So o build em `.derived` ou `dist/` nao entra na gaveta de apps do macOS.
+Para o Kop aparecer no Spotlight, ele precisa estar instalado em `/Applications`.
+So o build em `.derived` ou `dist/` nao entra no catalogo normal de apps do macOS.
+
+O Kop e um menu bar app. Por design do macOS, apps com `LSUIElement = true` nao aparecem no Launchpad. Isso e esperado.
 
 Fluxo recomendado:
 
 1. Rode `./Scripts/create_dmg.sh`
 2. Quando o DMG abrir, arraste `Kop.app` para `Applications`
-3. Abra o app uma vez
+3. Rode `lsregister -f /Applications/Kop.app`
+4. Abra o app uma vez
 
 Se quiser automatizar a copia para `/Applications` em vez de arrastar manualmente, depois de gerar o build Release em `dist/Kop.app`, rode:
 
@@ -58,7 +61,7 @@ chmod +x Scripts/install_app.sh
 ./Scripts/install_app.sh
 ```
 
-Isso copia o app para `/Applications/Kop.app`, registra no Launch Services, reimporta no Spotlight, reinicia o Dock e abre o Kop uma vez.
+Isso copia o app para `/Applications/Kop.app`, remove quarentena, registra no Launch Services, reimporta no Spotlight, reinicia o Dock e abre o Kop uma vez.
 
 ## Permissoes
 
@@ -68,8 +71,8 @@ Isso copia o app para `/Applications/Kop.app`, registra no Launch Services, reim
 
 ## Distribuicao fora da App Store
 
-- O bundle e distribuido como app macOS normal para aparecer no Spotlight e no Launchpad.
-- Em execucao, o Kop continua se comportando como menu bar app porque usa `NSApp.setActivationPolicy(.accessory)`.
+- O Kop e distribuido como menu bar app nativo.
+- Ele aparece no Spotlight quando instalado em `/Applications`, mas nao aparece no Launchpad por causa de `LSUIElement = true`.
 - O sandbox deve permanecer desativado para que o comportamento global do clipboard funcione sem restricoes.
 - Assine o app com um certificado `Developer ID Application`.
 - Gere um `.app` assinado e, se for distribuir para terceiros, notarize o binario antes de montar o `.dmg`.

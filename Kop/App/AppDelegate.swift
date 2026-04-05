@@ -22,7 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var preferencesWindowController = PreferencesWindowController(viewModel: preferencesViewModel)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
         statusItemController = StatusItemController(
             panelAction: { [weak self] in self?.togglePanel() },
             clearAction: { [weak self] in self?.clearHistory() },

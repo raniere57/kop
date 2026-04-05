@@ -21,6 +21,10 @@ echo "Registering with Launch Services..."
 echo "Refreshing Spotlight metadata..."
 mdimport "$TARGET_PATH" || true
 
+echo "Forcing Spotlight metadata import..."
+xattr -d com.apple.quarantine "$TARGET_PATH" 2>/dev/null || true
+touch "$TARGET_PATH"
+
 echo "Rebuilding Launch Services registration..."
 /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -kill -r -domain local -domain system -domain user || true
 
