@@ -19,6 +19,25 @@ Via terminal:
 xcodebuild -project Kop.xcodeproj -scheme Kop -configuration Debug build
 ```
 
+## Gerar DMG
+
+Para criar um `.dmg` instalavel com o app:
+
+```sh
+chmod +x Scripts/create_dmg.sh
+./Scripts/create_dmg.sh
+```
+
+Saida esperada:
+
+- App Release em `.derived/Build/Products/Release/Kop.app`
+- DMG final em `dist/Kop.dmg`
+
+O DMG gerado inclui:
+
+- `Kop.app`
+- atalho para `/Applications` para instalacao por drag and drop
+
 ## Permissoes
 
 - Clipboard: acesso via `NSPasteboard`
@@ -30,7 +49,7 @@ xcodebuild -project Kop.xcodeproj -scheme Kop -configuration Debug build
 - O target usa `LSUIElement = YES`, entao o app roda sem icone no Dock.
 - O sandbox deve permanecer desativado para que o comportamento global do clipboard funcione sem restricoes.
 - Assine o app com um certificado `Developer ID Application`.
-- Gere um `.app` assinado e notarizado antes de distribuir.
+- Gere um `.app` assinado e, se for distribuir para terceiros, notarize o binario antes de montar o `.dmg`.
 - Se quiser ativar "Iniciar com o sistema", confira o comportamento do `SMAppService.mainApp` no perfil de assinatura usado.
 
 ## Estrutura
