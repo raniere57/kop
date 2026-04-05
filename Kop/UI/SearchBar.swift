@@ -71,6 +71,10 @@ private struct SearchField: NSViewRepresentable {
 }
 
 private final class EscapableSearchTextField: NSTextField {
+    override func cancelOperation(_ sender: Any?) {
+        NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
+    }
+
     override func keyDown(with event: NSEvent) {
         if Int(event.keyCode) == 53 {
             NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)

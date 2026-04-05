@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var hotkeyManager: HotkeyManager?
     private var panelController: PanelController?
+    private lazy var preferencesWindowController = PreferencesWindowController(viewModel: preferencesViewModel)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -48,6 +49,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: .preferencesHotkeyChanged,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenPreferencesNotification),
+            name: .openPreferencesWindow,
+            object: nil
+        )
 
         clipboardMonitor.start()
     }
@@ -61,6 +68,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager?.registerShortcut(preferences.hotkey)
     }
 
+    @objc private func handleOpenPreferencesNotification() {
+        openPreferences()
+    }
+
     private func togglePanel() {
         panelController?.toggle()
     }
@@ -71,8 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openPreferences() {
-        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
         NSApp.activate(ignoringOtherApps: true)
+        preferencesWindowController.show()
     }
 
     private func toggleMonitoring() {

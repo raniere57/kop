@@ -27,6 +27,7 @@
 		A00000000000000000000012 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000032 /* StatusItemController.swift */; };
 		A00000000000000000000013 /* Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000033 /* Notifications.swift */; };
 		A00000000000000000000014 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000034 /* Assets.xcassets */; };
+		A00000000000000000000015 /* PreferencesWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000038 /* PreferencesWindowController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -54,6 +55,7 @@
 		A00000000000000000000035 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A00000000000000000000036 /* Kop.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Kop.entitlements; sourceTree = "<group>"; };
 		A00000000000000000000037 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		A00000000000000000000038 /* PreferencesWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesWindowController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -127,6 +129,7 @@
 				A0000000000000000000002C /* SearchBar.swift */,
 				A0000000000000000000002D /* PreferencesView.swift */,
 				A0000000000000000000002E /* PreviewWindowController.swift */,
+				A00000000000000000000038 /* PreferencesWindowController.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -236,6 +239,7 @@
 				A0000000000000000000000C /* SearchBar.swift in Sources */,
 				A0000000000000000000000D /* PreferencesView.swift in Sources */,
 				A0000000000000000000000E /* PreviewWindowController.swift in Sources */,
+				A00000000000000000000015 /* PreferencesWindowController.swift in Sources */,
 				A0000000000000000000000F /* ImageThumbnail.swift in Sources */,
 				A00000000000000000000010 /* AppIconFetcher.swift in Sources */,
 				A00000000000000000000011 /* PasteSimulator.swift in Sources */,

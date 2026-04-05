@@ -4,11 +4,16 @@ import SwiftUI
 final class KopPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func cancelOperation(_ sender: Any?) {
+        NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
+    }
 }
 
 final class PanelController: NSWindowController, NSWindowDelegate {
     private let viewModel: ClipboardHistoryViewModel
     private let preferences: PreferencesStore
+    private var keyMonitor: Any?
 
     init(viewModel: ClipboardHistoryViewModel, preferences: PreferencesStore) {
         self.viewModel = viewModel
@@ -65,6 +70,10 @@ final class PanelController: NSWindowController, NSWindowDelegate {
     }
 
     @objc func closePanel() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
         window?.orderOut(nil)
     }
 
@@ -90,6 +99,7 @@ final class PanelController: NSWindowController, NSWindowDelegate {
 
         panel.alphaValue = 0
         panel.setFrame(initialFrame, display: false)
+        installKeyMonitorIfNeeded()
         panel.orderFrontRegardless()
         panel.makeKey()
 
@@ -113,5 +123,16 @@ final class PanelController: NSWindowController, NSWindowDelegate {
             y: visible.midY - size.height / 2
         )
         panel.setFrameOrigin(origin)
+    }
+
+    private func installKeyMonitorIfNeeded() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if Int(event.keyCode) == 53 {
+                NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
+                return nil
+            }
+            return event
+        }
     }
 }

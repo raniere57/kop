@@ -13,10 +13,7 @@ struct KopPanelView: View {
                 SearchBar(text: $viewModel.searchText)
                     .focused($searchFocused)
                 Button {
-                    NSApp.activate(ignoringOtherApps: true)
-                    DispatchQueue.main.async {
-                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-                    }
+                    NotificationCenter.default.post(name: .openPreferencesWindow, object: nil)
                 } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 15, weight: .medium))
@@ -155,6 +152,10 @@ final class KeyHandlingNSView: NSView {
     var onReturn: (() -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func cancelOperation(_ sender: Any?) {
+        onEscape?()
+    }
 
     override func keyDown(with event: NSEvent) {
         switch Int(event.keyCode) {
