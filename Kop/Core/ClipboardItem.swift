@@ -21,6 +21,7 @@ struct ClipboardEntry: Identifiable, Equatable {
     let createdAt: Date
     let updatedAt: Date
     let isFavorite: Bool
+    let customTitle: String?
     let fingerprint: String
 
     var previewText: String {
@@ -39,6 +40,19 @@ struct ClipboardEntry: Identifiable, Equatable {
         case .pdf:
             return filePath ?? "Documento PDF"
         }
+    }
+
+    var displayTitle: String {
+        let title = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return title.isEmpty ? previewText : title
+    }
+
+    var secondaryPreviewText: String? {
+        let title = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !title.isEmpty else { return nil }
+        let preview = previewText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !preview.isEmpty, preview != title else { return nil }
+        return preview
     }
 }
 

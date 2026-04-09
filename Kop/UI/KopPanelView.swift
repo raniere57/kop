@@ -22,56 +22,87 @@ struct KopPanelView: View {
             }
             .padding(16)
 
-            Divider()
-
-            List(selection: $viewModel.selectedItemID) {
-                ForEach(viewModel.items) { item in
-                    ClipboardItemRow(item: item, isSelected: viewModel.selectedItemID == item.id)
-                        .tag(item.id)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .contentShape(Rectangle())
-                        .contextMenu {
-                            Button("Copiar") {
-                                viewModel.copy(item: item, plainTextOnly: false, autoPaste: false)
-                            }
-                            if item.type == .richText {
-                                Button("Copiar como texto puro") {
-                                    viewModel.copy(item: item, plainTextOnly: true, autoPaste: false)
-                                }
-                            }
-                            if item.type == .fileURL, let path = item.filePath {
-                                Button("Abrir arquivo") {
-                                    NSWorkspace.shared.open(URL(fileURLWithPath: path))
-                                }
-                            }
-                            Button("Visualizar") {
-                                PreviewWindowController.shared.show(item: item)
-                            }
-                            Button(item.isFavorite ? "Remover favorito" : "Favoritar") {
-                                viewModel.toggleFavorite(item: item)
-                            }
-                            Button("Deletar", role: .destructive) {
-                                viewModel.delete(item: item)
-                            }
-                            Button("Copiar e Colar") {
-                                viewModel.copy(item: item, plainTextOnly: false, autoPaste: true)
-                            }
-                        }
-                        .onTapGesture {
-                            viewModel.selectedItemID = item.id
-                            viewModel.copy(item: item, plainTextOnly: false, autoPaste: false)
-                        }
-                        .onAppear {
-                            viewModel.loadMoreIfNeeded(currentItem: item)
-                        }
-                        .help(item.previewText)
+            Picker("Filtro", selection: $viewModel.listFilter) {
+                ForEach(ClipboardListFilter.allCases) { filter in
+                    Text(filter.title).tag(filter)
                 }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(.clear)
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+
+            Divider()
+
+            ZStack {
+                List(selection: $viewModel.selectedItemID) {
+                    ForEach(viewModel.items) { item in
+                        ClipboardItemRow(item: item, isSelected: viewModel.selectedItemID == item.id)
+                            .tag(item.id)
+                            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .contentShape(Rectangle())
+                            .contextMenu {
+                                Button("Copiar") {
+                                    viewModel.copy(item: item, plainTextOnly: false, autoPaste: false)
+                                }
+                                if item.type == .richText {
+                                    Button("Copiar como texto puro") {
+                                        viewModel.copy(item: item, plainTextOnly: true, autoPaste: false)
+                                    }
+                                }
+                                if item.type == .fileURL, let path = item.filePath {
+                                    Button("Abrir arquivo") {
+                                        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                                    }
+                                }
+                                Button("Visualizar") {
+                                    PreviewWindowController.shared.show(item: item)
+                                }
+                                Button(item.isFavorite ? "Remover favorito" : "Favoritar") {
+                                    viewModel.toggleFavorite(item: item)
+                                }
+                                if item.isFavorite {
+                                    Button(item.customTitle == nil ? "Dar título" : "Editar título") {
+                                        promptForTitle(item)
+                                    }
+                                }
+                                Button("Deletar", role: .destructive) {
+                                    viewModel.delete(item: item)
+                                }
+                                Button("Copiar e Colar") {
+                                    viewModel.copy(item: item, plainTextOnly: false, autoPaste: true)
+                                }
+                            }
+                            .onTapGesture {
+                                viewModel.selectedItemID = item.id
+                                viewModel.copy(item: item, plainTextOnly: false, autoPaste: false)
+                            }
+                            .onAppear {
+                                viewModel.loadMoreIfNeeded(currentItem: item)
+                            }
+                            .help(item.customTitle ?? item.previewText)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(.clear)
+
+                if viewModel.items.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: viewModel.listFilter == .favorites ? "star" : "doc.on.doc")
+                            .font(.system(size: 26))
+                            .foregroundStyle(.secondary)
+                        Text(viewModel.emptyStateTitle)
+                            .font(.system(size: 15, weight: .semibold))
+                        Text(viewModel.emptyStateMessage)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(24)
+                }
+            }
         }
         .background(PanelBackgroundView().ignoresSafeArea())
         .frame(minWidth: 420, idealWidth: 420, maxWidth: 520, minHeight: 400, idealHeight: 520)
@@ -97,6 +128,24 @@ struct KopPanelView: View {
         case .light: return .light
         case .dark: return .dark
         }
+    }
+
+    private func promptForTitle(_ item: ClipboardEntry) {
+        let field = NSTextField(string: item.customTitle ?? "")
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+
+        let alert = NSAlert()
+        alert.messageText = "Título do favorito"
+        alert.informativeText = "Dê um nome curto para encontrar este item mais rápido. Deixe vazio para remover o título."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Salvar")
+        alert.addButton(withTitle: "Cancelar")
+
+        NSApp.activate(ignoringOtherApps: true)
+        field.selectText(nil)
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        viewModel.updateCustomTitle(item: item, title: field.stringValue)
     }
 }
 

@@ -2,11 +2,26 @@ import AppKit
 import Combine
 import SwiftUI
 
+enum ClipboardListFilter: String, CaseIterable, Identifiable {
+    case all
+    case favorites
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "Tudo"
+        case .favorites: return "Favoritos"
+        }
+    }
+}
+
 @MainActor
 final class ClipboardHistoryViewModel: ObservableObject {
     @Published private(set) var items: [ClipboardEntry] = []
     @Published var searchText = ""
     @Published var selectedItemID: Int64?
+    @Published var listFilter: ClipboardListFilter = .all
 
     private let persistence: PersistenceManager
     private let preferences: PreferencesStore
@@ -34,12 +49,23 @@ final class ClipboardHistoryViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        $listFilter
+            .sink { [weak self] _ in
+                self?.reload()
+            }
+            .store(in: &cancellables)
+
         reload()
     }
 
     func reload() {
         currentOffset = 0
-        let freshItems = persistence.fetchItems(offset: 0, limit: pageSize, searchTerm: searchText)
+        let freshItems = persistence.fetchItems(
+            offset: 0,
+            limit: pageSize,
+            searchTerm: searchText,
+            favoritesOnly: listFilter == .favorites
+        )
         items = freshItems
         selectedItemID = freshItems.first?.id
         hasMore = freshItems.count == pageSize
@@ -48,7 +74,12 @@ final class ClipboardHistoryViewModel: ObservableObject {
     func loadMoreIfNeeded(currentItem: ClipboardEntry) {
         guard hasMore, currentItem.id == items.last?.id else { return }
         currentOffset += pageSize
-        let nextPage = persistence.fetchItems(offset: currentOffset, limit: pageSize, searchTerm: searchText)
+        let nextPage = persistence.fetchItems(
+            offset: currentOffset,
+            limit: pageSize,
+            searchTerm: searchText,
+            favoritesOnly: listFilter == .favorites
+        )
         hasMore = nextPage.count == pageSize
         items.append(contentsOf: nextPage)
     }
@@ -128,8 +159,30 @@ final class ClipboardHistoryViewModel: ObservableObject {
         reload()
     }
 
+    func updateCustomTitle(item: ClipboardEntry, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        persistence.setCustomTitle(id: item.id, title: trimmed.isEmpty ? nil : trimmed)
+        reload()
+    }
+
     var selectedItem: ClipboardEntry? {
         guard let selectedItemID else { return items.first }
         return items.first(where: { $0.id == selectedItemID })
+    }
+
+    var emptyStateTitle: String {
+        if listFilter == .favorites {
+            return searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Nenhum favorito salvo"
+                : "Nenhum favorito encontrado"
+        }
+        return "Nenhum item encontrado"
+    }
+
+    var emptyStateMessage: String {
+        if listFilter == .favorites {
+            return "Favorite itens importantes para encontrá-los mais rápido."
+        }
+        return "Tente ajustar a busca para encontrar uma cópia anterior."
     }
 }

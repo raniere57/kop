@@ -60,26 +60,25 @@ final class PersistenceManager {
         }
     }
 
-    func fetchItems(offset: Int, limit: Int, searchTerm: String?) -> [ClipboardEntry] {
+    func fetchItems(offset: Int, limit: Int, searchTerm: String?, favoritesOnly: Bool) -> [ClipboardEntry] {
         queue.sync {
             let hasSearch = !(searchTerm?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-            let sql: String
+            var conditions: [String] = []
             if hasSearch {
-                sql = """
-                SELECT id, type, text_content, rich_text_data, binary_data, file_path, thumbnail_path, source_app_name, source_bundle_id, created_at, updated_at, is_favorite, fingerprint
-                FROM clipboard_items
-                WHERE text_content LIKE ? OR file_path LIKE ? OR source_app_name LIKE ?
-                ORDER BY updated_at DESC
-                LIMIT ? OFFSET ?;
-                """
-            } else {
-                sql = """
-                SELECT id, type, text_content, rich_text_data, binary_data, file_path, thumbnail_path, source_app_name, source_bundle_id, created_at, updated_at, is_favorite, fingerprint
-                FROM clipboard_items
-                ORDER BY updated_at DESC
-                LIMIT ? OFFSET ?;
-                """
+                conditions.append("(text_content LIKE ? OR file_path LIKE ? OR source_app_name LIKE ? OR custom_title LIKE ?)")
             }
+            if favoritesOnly {
+                conditions.append("is_favorite = 1")
+            }
+
+            let whereClause = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
+            let sql = """
+            SELECT id, type, text_content, rich_text_data, binary_data, file_path, thumbnail_path, source_app_name, source_bundle_id, created_at, updated_at, is_favorite, custom_title, fingerprint
+            FROM clipboard_items
+            \(whereClause)
+            ORDER BY updated_at DESC
+            LIMIT ? OFFSET ?;
+            """
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
             defer { sqlite3_finalize(statement) }
@@ -90,7 +89,8 @@ final class PersistenceManager {
                 sqlite3_bind_text(statement, index, pattern, -1, transient)
                 sqlite3_bind_text(statement, index + 1, pattern, -1, transient)
                 sqlite3_bind_text(statement, index + 2, pattern, -1, transient)
-                index += 3
+                sqlite3_bind_text(statement, index + 3, pattern, -1, transient)
+                index += 4
             }
             sqlite3_bind_int(statement, index, Int32(limit))
             sqlite3_bind_int(statement, index + 1, Int32(offset))
@@ -114,6 +114,18 @@ final class PersistenceManager {
             guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
             defer { sqlite3_finalize(statement) }
             sqlite3_bind_int(statement, 1, isFavorite ? 1 : 0)
+            sqlite3_bind_int64(statement, 2, id)
+            sqlite3_step(statement)
+        }
+    }
+
+    func setCustomTitle(id: Int64, title: String?) {
+        queue.sync {
+            let sql = "UPDATE clipboard_items SET custom_title = ? WHERE id = ?;"
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(statement) }
+            bindOptionalText(title, to: 1, in: statement)
             sqlite3_bind_int64(statement, 2, id)
             sqlite3_step(statement)
         }
@@ -205,11 +217,12 @@ final class PersistenceManager {
         CREATE INDEX IF NOT EXISTS idx_clipboard_updated_at ON clipboard_items(updated_at DESC);
         """
         _ = sqlite3_exec(db, sql, nil, nil, nil)
+        _ = sqlite3_exec(db, "ALTER TABLE clipboard_items ADD COLUMN custom_title TEXT;", nil, nil, nil)
     }
 
     private func fetchLatestInternal() -> ClipboardEntry? {
         let sql = """
-        SELECT id, type, text_content, rich_text_data, binary_data, file_path, thumbnail_path, source_app_name, source_bundle_id, created_at, updated_at, is_favorite, fingerprint
+        SELECT id, type, text_content, rich_text_data, binary_data, file_path, thumbnail_path, source_app_name, source_bundle_id, created_at, updated_at, is_favorite, custom_title, fingerprint
         FROM clipboard_items
         ORDER BY updated_at DESC
         LIMIT 1;
@@ -263,7 +276,8 @@ final class PersistenceManager {
             createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 9)),
             updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 10)),
             isFavorite: sqlite3_column_int(statement, 11) == 1,
-            fingerprint: stringValue(from: statement, at: 12) ?? UUID().uuidString
+            customTitle: stringValue(from: statement, at: 12),
+            fingerprint: stringValue(from: statement, at: 13) ?? UUID().uuidString
         )
     }
 

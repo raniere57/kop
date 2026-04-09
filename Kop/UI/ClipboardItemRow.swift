@@ -9,10 +9,16 @@ struct ClipboardItemRow: View {
         HStack(spacing: 12) {
             thumbnail
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.previewText)
-                    .font(.system(size: 13))
-                    .lineLimit(2)
+                Text(item.displayTitle)
+                    .font(.system(size: 13, weight: item.customTitle == nil ? .regular : .semibold))
+                    .lineLimit(item.customTitle == nil ? 2 : 1)
                     .foregroundStyle(.primary)
+                if let secondaryPreviewText = item.secondaryPreviewText {
+                    Text(secondaryPreviewText)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                }
                 HStack(spacing: 6) {
                     if let appIcon = AppIconFetcher.icon(for: item.sourceBundleIdentifier, appName: item.sourceAppName) {
                         Image(nsImage: appIcon)
