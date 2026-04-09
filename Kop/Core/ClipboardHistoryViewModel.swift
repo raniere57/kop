@@ -60,12 +60,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
 
     func reload() {
         currentOffset = 0
-        let freshItems = persistence.fetchItems(
-            offset: 0,
-            limit: pageSize,
-            searchTerm: searchText,
-            favoritesOnly: listFilter == .favorites
-        )
+        let freshItems = fetchPage(offset: 0)
         items = freshItems
         selectedItemID = freshItems.first?.id
         hasMore = freshItems.count == pageSize
@@ -74,12 +69,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
     func loadMoreIfNeeded(currentItem: ClipboardEntry) {
         guard hasMore, currentItem.id == items.last?.id else { return }
         currentOffset += pageSize
-        let nextPage = persistence.fetchItems(
-            offset: currentOffset,
-            limit: pageSize,
-            searchTerm: searchText,
-            favoritesOnly: listFilter == .favorites
-        )
+        let nextPage = fetchPage(offset: currentOffset)
         hasMore = nextPage.count == pageSize
         items.append(contentsOf: nextPage)
     }
@@ -184,5 +174,28 @@ final class ClipboardHistoryViewModel: ObservableObject {
             return "Favorite itens importantes para encontrá-los mais rápido."
         }
         return "Tente ajustar a busca para encontrar uma cópia anterior."
+    }
+
+    private func fetchPage(offset: Int) -> [ClipboardEntry] {
+        if listFilter == .favorites {
+            let scanLimit = max(preferences.historyLimit ?? 5_000, pageSize)
+            let allItems = persistence.fetchItems(
+                offset: 0,
+                limit: scanLimit,
+                searchTerm: searchText,
+                favoritesOnly: false
+            )
+            let favorites = allItems.filter(\.isFavorite)
+            guard offset < favorites.count else { return [] }
+            let endIndex = min(offset + pageSize, favorites.count)
+            return Array(favorites[offset..<endIndex])
+        }
+
+        return persistence.fetchItems(
+            offset: offset,
+            limit: pageSize,
+            searchTerm: searchText,
+            favoritesOnly: false
+        )
     }
 }
