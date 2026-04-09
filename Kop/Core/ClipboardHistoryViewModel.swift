@@ -44,23 +44,28 @@ final class ClipboardHistoryViewModel: ObservableObject {
 
         $searchText
             .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.reload()
+            .sink { [weak self] searchText in
+                self?.reload(searchTerm: searchText)
             }
             .store(in: &cancellables)
 
         $listFilter
-            .sink { [weak self] _ in
-                self?.reload()
+            .removeDuplicates()
+            .sink { [weak self] listFilter in
+                self?.reload(filter: listFilter)
             }
             .store(in: &cancellables)
 
         reload()
     }
 
-    func reload() {
+    func reload(searchTerm: String? = nil, filter: ClipboardListFilter? = nil) {
         currentOffset = 0
-        let freshItems = fetchPage(offset: 0)
+        let freshItems = fetchPage(
+            offset: 0,
+            searchTerm: searchTerm ?? self.searchText,
+            filter: filter ?? self.listFilter
+        )
         items = freshItems
         selectedItemID = freshItems.first?.id
         hasMore = freshItems.count == pageSize
@@ -69,7 +74,11 @@ final class ClipboardHistoryViewModel: ObservableObject {
     func loadMoreIfNeeded(currentItem: ClipboardEntry) {
         guard hasMore, currentItem.id == items.last?.id else { return }
         currentOffset += pageSize
-        let nextPage = fetchPage(offset: currentOffset)
+        let nextPage = fetchPage(
+            offset: currentOffset,
+            searchTerm: searchText,
+            filter: listFilter
+        )
         hasMore = nextPage.count == pageSize
         items.append(contentsOf: nextPage)
     }
@@ -176,13 +185,13 @@ final class ClipboardHistoryViewModel: ObservableObject {
         return "Tente ajustar a busca para encontrar uma cópia anterior."
     }
 
-    private func fetchPage(offset: Int) -> [ClipboardEntry] {
-        if listFilter == .favorites {
+    private func fetchPage(offset: Int, searchTerm: String, filter: ClipboardListFilter) -> [ClipboardEntry] {
+        if filter == .favorites {
             let scanLimit = max(preferences.historyLimit ?? 5_000, pageSize)
             let allItems = persistence.fetchItems(
                 offset: 0,
                 limit: scanLimit,
-                searchTerm: searchText,
+                searchTerm: searchTerm,
                 favoritesOnly: false
             )
             let favorites = allItems.filter(\.isFavorite)
@@ -194,7 +203,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
         return persistence.fetchItems(
             offset: offset,
             limit: pageSize,
-            searchTerm: searchText,
+            searchTerm: searchTerm,
             favoritesOnly: false
         )
     }
