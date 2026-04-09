@@ -22,12 +22,21 @@ struct KopPanelView: View {
             }
             .padding(16)
 
-            Picker("Filtro", selection: $viewModel.listFilter) {
-                ForEach(ClipboardListFilter.allCases) { filter in
-                    Text(filter.title).tag(filter)
+            HStack(spacing: 12) {
+                Text("Filtro")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 4) {
+                    filterButton(for: .all)
+                    filterButton(for: .favorites)
                 }
+                .padding(4)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                )
             }
-            .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
 
@@ -128,6 +137,24 @@ struct KopPanelView: View {
         case .light: return .light
         case .dark: return .dark
         }
+    }
+
+    @ViewBuilder
+    private func filterButton(for filter: ClipboardListFilter) -> some View {
+        Button {
+            viewModel.listFilter = filter
+        } label: {
+            Text(filter.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(viewModel.listFilter == filter ? Color.white : Color.primary.opacity(0.85))
+                .frame(minWidth: 96)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(viewModel.listFilter == filter ? Color.accentColor : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func promptForTitle(_ item: ClipboardEntry) {
