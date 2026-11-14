@@ -3,7 +3,7 @@ import PDFKit
 import SwiftUI
 
 @MainActor
-final class PreviewWindowController: NSWindowController {
+final class PreviewWindowController: NSWindowController, NSWindowDelegate {
     static let shared = PreviewWindowController()
 
     private init() {
@@ -42,7 +42,13 @@ final class PreviewWindowController: NSWindowController {
         )
         window.isReleasedWhenClosed = false
         window.contentMinSize = NSSize(width: 360, height: 260)
+        window.delegate = self
         return window
+    }
+
+    /// The window is reused; drop the hosted item (and its payload) on close.
+    func windowWillClose(_ notification: Notification) {
+        window?.contentViewController = nil
     }
 }
 

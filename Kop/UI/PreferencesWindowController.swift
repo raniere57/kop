@@ -10,7 +10,10 @@ final class PreferencesWindow: NSWindow {
 
 @MainActor
 final class PreferencesWindowController: NSWindowController {
+    private let viewModel: PreferencesViewModel
+
     init(viewModel: PreferencesViewModel) {
+        self.viewModel = viewModel
         let rootView = PreferencesView(viewModel: viewModel)
         let hostingController = NSHostingController(rootView: rootView)
         let window = PreferencesWindow(contentViewController: hostingController)
@@ -30,6 +33,8 @@ final class PreferencesWindowController: NSWindowController {
 
     func show() {
         guard let window else { return }
+        // The window is reused, so stats must be re-read on every show.
+        viewModel.refresh()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

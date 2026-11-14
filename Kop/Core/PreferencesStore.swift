@@ -20,13 +20,13 @@ public struct HotkeyShortcut: Equatable {
         return parts + Self.keyName(for: keyCode)
     }
 
-    /// True when at least one modifier is set. Registering a bare key would
-    /// swallow it system-wide, so the recorder rejects those.
-    public var hasModifier: Bool { modifiers != 0 }
+    /// True when Command, Option or Control is set. A bare key, or Shift
+    /// alone (a capital letter), would be swallowed system-wide.
+    public var hasModifier: Bool { modifiers & UInt32(cmdKey | optionKey | controlKey) != 0 }
 
     private static let keyNames: [Int: String] = [
-        kVK_Space: "Space", kVK_Return: "Return", kVK_Escape: "Esc",
-        kVK_Tab: "Tab", kVK_Delete: "Delete", kVK_ForwardDelete: "Del",
+        kVK_Space: "Espaço", kVK_Return: "Retorno", kVK_Escape: "Esc",
+        kVK_Tab: "Tab", kVK_Delete: "Apagar", kVK_ForwardDelete: "Del",
         kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
         kVK_ANSI_A: "A", kVK_ANSI_B: "B", kVK_ANSI_C: "C", kVK_ANSI_D: "D",
         kVK_ANSI_E: "E", kVK_ANSI_F: "F", kVK_ANSI_G: "G", kVK_ANSI_H: "H",
@@ -48,7 +48,7 @@ public struct HotkeyShortcut: Equatable {
     ]
 
     static func keyName(for keyCode: UInt32) -> String {
-        keyNames[Int(keyCode)] ?? "Key \(keyCode)"
+        keyNames[Int(keyCode)] ?? "Tecla \(keyCode)"
     }
 }
 
@@ -86,8 +86,8 @@ public enum KopTheme: String, CaseIterable, Identifiable {
     public var appearance: NSAppearance? {
         switch self {
         case .system: return nil
-        case .light: return NSAppearance(named: .vibrantLight)
-        case .dark: return NSAppearance(named: .vibrantDark)
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
         }
     }
 }

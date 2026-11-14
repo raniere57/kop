@@ -12,6 +12,10 @@ struct ImageLightboxView: View {
     let onPaste: () -> Void
     let onClose: () -> Void
 
+    /// Decoded once per item (not on every `body` pass) and dropped when the
+    /// view goes away on collapse.
+    @State private var decoded: (id: Int64, image: NSImage?)?
+
     var body: some View {
         ZStack {
             // Tapping the backdrop collapses, matching Esc.
@@ -31,11 +35,21 @@ struct ImageLightboxView: View {
             }
         }
         .transition(.opacity)
+        .onAppear(perform: decodeIfNeeded)
+        .onChange(of: item.id) { _ in decodeIfNeeded() }
+        .onDisappear { decoded = nil }
+    }
+
+    private func decodeIfNeeded() {
+        guard decoded?.id != item.id else { return }
+        decoded = (item.id, ImageThumbnail.shared.originalOrThumbnail(for: item))
     }
 
     @ViewBuilder
     private var imageContent: some View {
-        if let image = ImageThumbnail.shared.originalOrThumbnail(for: item) {
+        if decoded?.id != item.id {
+            Color.clear
+        } else if let image = decoded?.image {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)

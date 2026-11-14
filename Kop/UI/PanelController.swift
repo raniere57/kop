@@ -110,6 +110,7 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         setExpandedLayout(false, animated: false)
         viewModel.collapse()
         window.orderOut(nil)
+        viewModel.isPanelVisible = false
         viewModel.searchText = ""
         viewModel.listFilter = .all
     }
@@ -131,6 +132,12 @@ final class PanelController: NSWindowController, NSWindowDelegate {
 
     private func showPanel() {
         guard let panel = window as? NSPanel else { return }
+        // Kop's own windows can be frontmost here; keep the last real target.
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            viewModel.pasteTargetApp = frontmost
+        }
+        viewModel.isPanelVisible = true
         viewModel.reload()
         position(panel: panel)
 
@@ -290,8 +297,14 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         case Key.returnKey, Key.keypadEnter:
             viewModel.activateSelectedItem(plainTextOnly: shift)
             return true
-        case Key.delete where command:
-            viewModel.deleteSelected()
+        // With text in the search field, ⌘⌫ belongs to the field ("delete to
+        // start of line"). Favorites are never deleted by the shortcut.
+        case Key.delete where command && viewModel.searchText.isEmpty:
+            if viewModel.selectedItem?.isFavorite == true {
+                NSSound.beep()
+            } else {
+                viewModel.deleteSelected()
+            }
             return true
         default:
             break

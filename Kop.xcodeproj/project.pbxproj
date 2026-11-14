@@ -196,10 +196,10 @@
 			};
 			buildConfigurationList = A00000000000000000000071 /* Build configuration list for PBXProject "Kop" */;
 			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = en;
+			developmentRegion = "pt-BR";
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
+				"pt-BR",
 				Base,
 			);
 			mainGroup = A00000000000000000000050;

@@ -169,6 +169,13 @@ private extension RelativeDateTimeFormatter {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         formatter.dateTimeStyle = .named
+        formatter.locale = .kop
         return formatter
     }()
+}
+
+extension Locale {
+    /// The UI is written in Brazilian Portuguese; dates and sizes must match
+    /// it regardless of the system language.
+    static let kop = Locale(identifier: "pt_BR")
 }

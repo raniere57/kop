@@ -3,6 +3,17 @@ import Carbon
 import Combine
 import SwiftUI
 
+/// Runs blocking work (database cleanups) on a background queue and resumes
+/// the caller afterwards, back on its actor.
+func runOffMain(_ work: @escaping () -> Void) async {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global(qos: .userInitiated).async {
+            work()
+            continuation.resume()
+        }
+    }
+}
+
 @MainActor
 final class PreferencesViewModel: ObservableObject {
     let preferences: PreferencesStore
@@ -11,6 +22,7 @@ final class PreferencesViewModel: ObservableObject {
 
     @Published var storageStats = StorageStats(totalItems: 0, totalSizeBytes: 0, oldestItemDate: nil)
     @Published var accessibilityGranted = AccessibilityPermission.isGranted
+    @Published private(set) var isCleaning = false
 
     init(preferences: PreferencesStore, persistence: PersistenceManager = .shared) {
         self.preferences = preferences
@@ -29,15 +41,26 @@ final class PreferencesViewModel: ObservableObject {
 
     func clearItemsOlderThan(days: Int) {
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-        persistence.deleteItemsOlderThan(cutoff)
-        refresh()
-        NotificationCenter.default.post(name: .clipboardHistoryChanged, object: nil)
+        let persistence = persistence
+        runCleanup { persistence.deleteItemsOlderThan(cutoff) }
     }
 
     func clearAllExceptFavorites() {
-        persistence.clearNonFavoriteItems()
-        refresh()
-        NotificationCenter.default.post(name: .clipboardHistoryChanged, object: nil)
+        let persistence = persistence
+        runCleanup { persistence.clearNonFavoriteItems() }
+    }
+
+    /// Cleanups end in a VACUUM that can take seconds, so they run off the
+    /// main thread while the buttons are disabled.
+    private func runCleanup(_ work: @escaping () -> Void) {
+        guard !isCleaning else { return }
+        isCleaning = true
+        Task {
+            await runOffMain(work)
+            isCleaning = false
+            refresh()
+            NotificationCenter.default.post(name: .clipboardHistoryChanged, object: nil)
+        }
     }
 }
 
@@ -59,6 +82,7 @@ struct PreferencesView: View {
 
             StoragePreferencesTab(
                 stats: viewModel.storageStats,
+                isCleaning: viewModel.isCleaning,
                 clear7Days: {
                     confirmAndRun(title: "Limpar itens com mais de 7 dias?", message: "Favoritos são mantidos.") {
                         viewModel.clearItemsOlderThan(days: 7)
@@ -79,7 +103,6 @@ struct PreferencesView: View {
             .tag(2)
         }
         .frame(width: 460, height: 400)
-        .onAppear { viewModel.refresh() }
         .background(PreferencesWindowConfigurator())
     }
 
@@ -209,6 +232,7 @@ struct PreferencesView: View {
 
 private struct StoragePreferencesTab: View {
     let stats: StorageStats
+    let isCleaning: Bool
     let clear7Days: () -> Void
     let clear30Days: () -> Void
     let clearAll: () -> Void
@@ -219,7 +243,7 @@ private struct StoragePreferencesTab: View {
                 VStack(alignment: .leading, spacing: 10) {
                     statRow("Itens no histórico", "\(stats.totalItems)")
                     Divider()
-                    statRow("Espaço ocupado", ByteCountFormatter.string(fromByteCount: stats.totalSizeBytes, countStyle: .file))
+                    statRow("Espaço ocupado", stats.totalSizeBytes.formatted(.byteCount(style: .file).locale(.kop)))
                     Divider()
                     statRow("Item mais antigo", oldestItemText)
                 }
@@ -230,8 +254,14 @@ private struct StoragePreferencesTab: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Button("Limpar itens com mais de 7 dias", action: clear7Days)
                     Button("Limpar itens com mais de 30 dias", action: clear30Days)
-                    Button("Limpar tudo (exceto favoritos)", action: clearAll)
+                    HStack(spacing: 8) {
+                        Button("Limpar tudo (exceto favoritos)", action: clearAll)
+                        if isCleaning {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
                 }
+                .disabled(isCleaning)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(6)
             }
@@ -243,7 +273,7 @@ private struct StoragePreferencesTab: View {
 
     private var oldestItemText: String {
         guard let date = stats.oldestItemDate else { return "—" }
-        return date.formatted(.dateTime.day().month(.wide).year())
+        return date.formatted(.dateTime.day().month(.wide).year().locale(.kop))
     }
 
     private func statRow(_ title: String, _ value: String) -> some View {
@@ -275,8 +305,8 @@ private struct HotkeyRecorderView: NSViewRepresentable {
     }
 }
 
-/// Click to record, then press any combination containing at least one
-/// modifier. Escape cancels.
+/// Click to record, then press a combination containing Command, Option or
+/// Control. Escape cancels.
 final class HotkeyRecorderNSView: NSView {
     var onChange: ((HotkeyShortcut) -> Void)?
 
@@ -284,8 +314,34 @@ final class HotkeyRecorderNSView: NSView {
         didSet { updateLabel() }
     }
 
+    /// The global hotkey is paused while recording, so pressing the current
+    /// shortcut records it instead of opening the panel.
     private(set) var isRecording = false {
-        didSet { updateLabel() }
+        didSet {
+            updateLabel()
+            guard isRecording != oldValue else { return }
+            NotificationCenter.default.post(name: .hotkeyRecordingChanged, object: isRecording)
+        }
+    }
+
+    private var windowObserver: NSObjectProtocol?
+
+    /// Closing or leaving the window must not leave the hotkey paused.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) }
+        windowObserver = nil
+        guard let window else {
+            isRecording = false
+            return
+        }
+        windowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.isRecording = false
+        }
     }
 
     private let label = NSTextField(labelWithString: "")

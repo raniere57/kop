@@ -147,14 +147,15 @@ struct KopPanelView: View {
         Button(item.isFavorite ? "Remover favorito" : "Favoritar") { viewModel.toggleFavorite(item: item) }
         Button(item.customTitle == nil ? "Dar título" : "Editar título") { promptForTitle(item) }
         Divider()
-        Button("Deletar", role: .destructive) { viewModel.delete(item: item) }
+        Button("Apagar", role: .destructive) { viewModel.delete(item: item) }
     }
 
     // MARK: - Footer
 
     private var footer: some View {
         HStack(spacing: 12) {
-            Text("\(viewModel.items.count) \(viewModel.items.count == 1 ? "item" : "itens")")
+            // Only loaded rows are counted; "+" says more pages exist.
+            Text("\(viewModel.items.count)\(viewModel.hasMore ? "+" : "") \(viewModel.items.count == 1 && !viewModel.hasMore ? "item" : "itens")")
             Spacer(minLength: 0)
             hint("↑↓", "navegar")
             hint("↵", preferences.pasteOnSelect ? "colar" : "copiar")

@@ -37,8 +37,12 @@ final class ClipboardHistoryViewModel: ObservableObject {
     private let clipboardMonitor: ClipboardMonitor
     private var cancellables: Set<AnyCancellable> = []
     private let pageSize = 50
-    private var currentOffset = 0
-    private var hasMore = true
+    private(set) var hasMore = true
+    /// Set by the panel controller. Reloads are skipped while the panel is
+    /// hidden; showing it reloads anyway.
+    var isPanelVisible = false
+    /// App that was frontmost when the panel opened; auto-paste goes back to it.
+    var pasteTargetApp: NSRunningApplication?
 
     init(persistence: PersistenceManager, preferences: PreferencesStore, clipboardMonitor: ClipboardMonitor) {
         self.persistence = persistence
@@ -47,7 +51,10 @@ final class ClipboardHistoryViewModel: ObservableObject {
 
         NotificationCenter.default.publisher(for: .clipboardHistoryChanged)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.reload() }
+            .sink { [weak self] _ in
+                guard let self, self.isPanelVisible else { return }
+                self.reload()
+            }
             .store(in: &cancellables)
 
         // `dropFirst` + `removeDuplicates` keep the panel from issuing three
@@ -57,7 +64,8 @@ final class ClipboardHistoryViewModel: ObservableObject {
             .dropFirst()
             .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
             .sink { [weak self] searchText in
-                self?.reload(searchTerm: searchText)
+                guard let self, self.isPanelVisible else { return }
+                self.reload(searchTerm: searchText)
             }
             .store(in: &cancellables)
 
@@ -65,25 +73,30 @@ final class ClipboardHistoryViewModel: ObservableObject {
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] listFilter in
-                self?.reload(filter: listFilter)
+                guard let self, self.isPanelVisible else { return }
+                self.reload(filter: listFilter)
             }
             .store(in: &cancellables)
-
-        reload()
+        // No initial load: the panel reloads every time it is shown.
     }
 
     // MARK: - Loading
 
+    /// A new search or filter starts from the first page; any other reload
+    /// (capture, favorite, rename) refetches everything already loaded so the
+    /// user keeps their place.
     func reload(searchTerm: String? = nil, filter: ClipboardListFilter? = nil) {
-        currentOffset = 0
+        let isNewQuery = searchTerm != nil || filter != nil
+        let limit = isNewQuery ? pageSize : max(items.count, pageSize)
         let freshItems = fetchPage(
             offset: 0,
+            limit: limit,
             searchTerm: searchTerm ?? searchText,
             filter: filter ?? listFilter
         )
         let previousSelection = selectedItemID
         items = freshItems
-        hasMore = freshItems.count == pageSize
+        hasMore = freshItems.count == limit
         // Keep the user's place: a new clipboard capture must not yank the
         // selection back to the top while they are navigating.
         if let previousSelection, freshItems.contains(where: { $0.id == previousSelection }) {
@@ -95,8 +108,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
 
     func loadMoreIfNeeded(currentItem: ClipboardEntry) {
         guard hasMore, currentItem.id == items.last?.id else { return }
-        currentOffset += pageSize
-        let nextPage = fetchPage(offset: currentOffset, searchTerm: searchText, filter: listFilter)
+        let nextPage = fetchPage(offset: items.count, limit: pageSize, searchTerm: searchText, filter: listFilter)
         hasMore = nextPage.count == pageSize
         items.append(contentsOf: nextPage)
     }
@@ -166,6 +178,9 @@ final class ClipboardHistoryViewModel: ObservableObject {
 
         guard autoPaste else { return }
         guard AccessibilityPermission.ensureGranted() else { return }
+        // If Kop itself became active (alert, preview, preferences), ⌘V would
+        // land in Kop: hand focus back to the app the panel was opened over.
+        pasteTargetApp?.activate(options: [])
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             PasteSimulator.simulatePaste()
         }
@@ -202,7 +217,10 @@ final class ClipboardHistoryViewModel: ObservableObject {
             if plainTextOnly {
                 pasteboard.setString(item.textContent ?? "", forType: .string)
             } else if let richTextData = item.richTextData {
-                pasteboard.setData(richTextData, forType: .rtf)
+                // HTML captures share this column; only real RTF may be
+                // published as RTF.
+                let isRTF = NSAttributedString(rtf: richTextData, documentAttributes: nil) != nil
+                pasteboard.setData(richTextData, forType: isRTF ? .rtf : .html)
                 if let textContent = item.textContent {
                     pasteboard.setString(textContent, forType: .string)
                 }
@@ -340,29 +358,19 @@ final class ClipboardHistoryViewModel: ObservableObject {
         return nil
     }
 
-    private func fetchPage(offset: Int, searchTerm: String, filter: ClipboardListFilter) -> [ClipboardEntry] {
+    private func fetchPage(offset: Int, limit: Int, searchTerm: String, filter: ClipboardListFilter) -> [ClipboardEntry] {
         persistence.fetchItems(
             offset: offset,
-            limit: pageSize,
+            limit: limit,
             searchTerm: searchTerm,
             favoritesOnly: filter == .favorites,
             includePayload: false
         )
     }
 
-    /// List rows are fetched without blobs; anything needing the payload gets
-    /// the full row here.
+    /// List rows carry no blobs and only a truncated text preview, so every
+    /// type is re-read in full before it reaches the pasteboard.
     private func resolvedItemForCopy(_ item: ClipboardEntry) -> ClipboardEntry {
-        switch item.type {
-        case .plainText, .fileURL:
-            return item
-        case .richText:
-            if item.richTextData != nil { return item }
-        case .image:
-            if item.binaryData != nil || item.filePath != nil { return item }
-        case .pdf:
-            if item.binaryData != nil { return item }
-        }
-        return persistence.fetchItem(id: item.id) ?? item
+        persistence.fetchItem(id: item.id) ?? item
     }
 }
