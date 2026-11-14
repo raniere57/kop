@@ -32,7 +32,7 @@ struct ClipboardEntry: Identifiable, Equatable {
             if let textContent, !textContent.isEmpty {
                 return textContent
             }
-            return "Rich text"
+            return "Texto formatado"
         case .image:
             return "Imagem"
         case .fileURL:

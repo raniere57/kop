@@ -33,6 +33,14 @@ func kopDigest(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
+/// Same hex as `kopDigest(Data(prefix.utf8) + data)` without copying `data`.
+func kopDigest(prefix: String, data: Data) -> String {
+    var hasher = SHA256()
+    hasher.update(data: Data(prefix.utf8))
+    hasher.update(data: data)
+    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+}
+
 struct ClipboardImagePayload {
     let filePath: String
     let pngData: Data
@@ -121,7 +129,8 @@ final class ImageThumbnail {
     private let cache = NSCache<NSString, NSImage>()
 
     private init() {
-        cache.countLimit = 200
+        // Bounded by decoded pixel bytes (cost = width x height x 4).
+        cache.totalCostLimit = 4 * 1024 * 1024
     }
 
     /// Downsamples via ImageIO (no full decode of the original) preserving the
@@ -176,7 +185,7 @@ final class ImageThumbnail {
             return NSImage(contentsOfFile: path)
         }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        cache.setObject(image, forKey: path as NSString)
+        cache.setObject(image, forKey: path as NSString, cost: cgImage.width * cgImage.height * 4)
         return image
     }
 
