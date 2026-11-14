@@ -18,8 +18,20 @@ enum KopStorage {
     static let images: URL = subdirectory("Images")
     static let thumbnails: URL = subdirectory("Thumbnails")
 
-    static func isManaged(_ path: String) -> Bool {
-        path.hasPrefix(images.path) || path.hasPrefix(thumbnails.path)
+    /// True only for a file strictly inside one of `directories` (default:
+    /// Kop's own folders). `..` is resolved first, and sibling folders such as
+    /// `ImagesBackup` do not match.
+    static func isManaged(_ path: String, in directories: [URL] = [images, thumbnails]) -> Bool {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        return directories.contains { standardized.hasPrefix($0.standardizedFileURL.path + "/") }
+    }
+
+    /// Returns true when `url` already exists, bumping its modification date
+    /// so the launch orphan sweep (24 h rule) treats a reused file as fresh.
+    static func reuseIfExists(_ url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        return true
     }
 
     private static func subdirectory(_ name: String) -> URL {
@@ -31,6 +43,14 @@ enum KopStorage {
 
 func kopDigest(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+}
+
+/// Same hex as `kopDigest(Data(prefix.utf8) + data)` without copying `data`.
+func kopDigest(prefix: String, data: Data) -> String {
+    var hasher = SHA256()
+    hasher.update(data: Data(prefix.utf8))
+    hasher.update(data: data)
+    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
 }
 
 struct ClipboardImagePayload {
@@ -94,7 +114,7 @@ enum ClipboardImageBridge {
 
     private static func exportPNG(_ pngData: Data) -> String? {
         let url = KopStorage.images.appendingPathComponent("\(kopDigest(pngData)).png")
-        if FileManager.default.fileExists(atPath: url.path) { return url.path }
+        if KopStorage.reuseIfExists(url) { return url.path }
         do {
             try pngData.write(to: url, options: .atomic)
             return url.path
@@ -121,7 +141,8 @@ final class ImageThumbnail {
     private let cache = NSCache<NSString, NSImage>()
 
     private init() {
-        cache.countLimit = 200
+        // Bounded by decoded pixel bytes (cost = width x height x 4).
+        cache.totalCostLimit = 4 * 1024 * 1024
     }
 
     /// Downsamples via ImageIO (no full decode of the original) preserving the
@@ -129,7 +150,7 @@ final class ImageThumbnail {
     func persistThumbnail(for data: Data) -> String? {
         autoreleasepool {
             let url = KopStorage.thumbnails.appendingPathComponent("\(kopDigest(data)).png")
-            if FileManager.default.fileExists(atPath: url.path) { return url.path }
+            if KopStorage.reuseIfExists(url) { return url.path }
 
             guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
             let options: [CFString: Any] = [
@@ -176,7 +197,7 @@ final class ImageThumbnail {
             return NSImage(contentsOfFile: path)
         }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        cache.setObject(image, forKey: path as NSString)
+        cache.setObject(image, forKey: path as NSString, cost: cgImage.width * cgImage.height * 4)
         return image
     }
 
@@ -199,8 +220,8 @@ final class ImageThumbnail {
 
     /// Removes files Kop generated for paths that no history row references
     /// anymore. Files the user owns (outside Kop's storage) are never touched.
-    func removeOrphanFiles(paths: [String], stillReferenced: Set<String>) {
-        for path in paths where KopStorage.isManaged(path) && !stillReferenced.contains(path) {
+    func removeOrphanFiles(paths: [String], stillReferenced: Set<String>, managedDirectories: [URL]) {
+        for path in paths where KopStorage.isManaged(path, in: managedDirectories) && !stillReferenced.contains(path) {
             cache.removeObject(forKey: path as NSString)
             try? FileManager.default.removeItem(atPath: path)
         }

@@ -14,6 +14,41 @@ id, type, text_content, rich_text_data, binary_data, file_path, thumbnail_path, 
 source_app_name, source_bundle_id, created_at, updated_at, is_favorite, custom_title, fingerprint
 """
 
+/// Small scalar columns first and the blobs last, so reading metadata never
+/// walks a blob's overflow pages. Tracked in `PRAGMA user_version`.
+private let schemaVersion = 1
+private let tableColumns = """
+id, type, file_path, thumbnail_path, source_app_name, source_bundle_id, created_at, updated_at, \
+is_favorite, custom_title, fingerprint, text_content, rich_text_data, binary_data
+"""
+
+private func createTableSQL(_ name: String) -> String {
+    """
+    CREATE TABLE \(name) (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        file_path TEXT,
+        thumbnail_path TEXT,
+        source_app_name TEXT,
+        source_bundle_id TEXT,
+        created_at DOUBLE NOT NULL,
+        updated_at DOUBLE NOT NULL,
+        is_favorite INTEGER NOT NULL DEFAULT 0,
+        custom_title TEXT,
+        fingerprint TEXT NOT NULL,
+        text_content TEXT,
+        rich_text_data BLOB,
+        binary_data BLOB
+    );
+    """
+}
+
+private let createIndexesSQL = """
+CREATE INDEX IF NOT EXISTS idx_clipboard_updated_at ON clipboard_items(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_clipboard_favorites ON clipboard_items(is_favorite, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_clipboard_fingerprint ON clipboard_items(fingerprint);
+"""
+
 final class PersistenceManager {
     static let shared = PersistenceManager()
 
@@ -25,6 +60,9 @@ final class PersistenceManager {
     var isAvailable: Bool { db != nil }
 
     private let dbURL: URL
+    /// Kop-owned file folders next to this database (KopStorage's folders for
+    /// the shared instance, sandboxed ones in the self-check).
+    private let fileDirectories: [URL]
     private let queue = DispatchQueue(label: "kop.persistence.queue")
     private var db: OpaquePointer?
 
@@ -32,9 +70,15 @@ final class PersistenceManager {
     /// throwaway database instead of the user's history.
     init(directory: URL = KopStorage.root) {
         dbURL = directory.appendingPathComponent("history.sqlite")
+        fileDirectories = ["Images", "Thumbnails"].map { directory.appendingPathComponent($0, isDirectory: true) }
         openDatabase()
         configureConnection()
-        createTableIfNeeded()
+        // Serial queue: every later call waits behind the schema work, and app
+        // launch is not blocked by rebuilding a large history.
+        queue.async {
+            self.prepareSchemaInternal()
+            self.sweepOrphanFilesInternal()
+        }
     }
 
     deinit {
@@ -43,13 +87,14 @@ final class PersistenceManager {
 
     // MARK: - Writes
 
-    func save(_ capture: ClipboardCapture, historyLimit: Int?) {
+    /// Returns whether a row was written or promoted.
+    @discardableResult
+    func save(_ capture: ClipboardCapture, historyLimit: Int?) -> Bool {
         queue.sync {
             // Dedupe against the whole history, not just the newest row, so
             // re-copying an older snippet promotes it instead of duplicating it.
             if let existingID = idForFingerprintInternal(capture.fingerprint) {
-                updateTimestamp(for: existingID, at: capture.createdAt)
-                return
+                return updateTimestamp(for: existingID, at: capture.createdAt)
             }
 
             let sql = """
@@ -58,7 +103,7 @@ final class PersistenceManager {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?);
             """
             var statement: OpaquePointer?
-            guard prepare(sql, into: &statement) else { return }
+            guard prepare(sql, into: &statement) else { return false }
             defer { sqlite3_finalize(statement) }
 
             sqlite3_bind_text(statement, 1, capture.type.rawValue, -1, SQLITE_TRANSIENT)
@@ -72,15 +117,16 @@ final class PersistenceManager {
             sqlite3_bind_double(statement, 9, capture.createdAt.timeIntervalSince1970)
             sqlite3_bind_double(statement, 10, capture.createdAt.timeIntervalSince1970)
             sqlite3_bind_text(statement, 11, capture.fingerprint, -1, SQLITE_TRANSIENT)
-            step(statement, context: "insert")
+            guard step(statement, context: "insert") else { return false }
 
             trimHistoryIfNeeded(limit: historyLimit)
+            return true
         }
     }
 
     /// Promotes an item to the top of the history without re-capturing it.
     func touch(id: Int64, at date: Date = Date()) {
-        queue.sync { updateTimestamp(for: id, at: date) }
+        queue.sync { _ = updateTimestamp(for: id, at: date) }
     }
 
     func setFavorite(id: Int64, isFavorite: Bool) {
@@ -120,10 +166,10 @@ final class PersistenceManager {
 
     func deleteItemsOlderThan(_ date: Date) {
         queue.sync {
-            let orphans = filePathsInternal(where: "is_favorite = 0 AND created_at < ?") { statement in
+            let orphans = filePathsInternal(where: "is_favorite = 0 AND updated_at < ?") { statement in
                 sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
             }
-            runInternal("DELETE FROM clipboard_items WHERE is_favorite = 0 AND created_at < ?;") { statement in
+            runInternal("DELETE FROM clipboard_items WHERE is_favorite = 0 AND updated_at < ?;") { statement in
                 sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
             }
             purgeOrphanFilesInternal(orphans)
@@ -156,9 +202,14 @@ final class PersistenceManager {
             let whereClause = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
             // Skipping the blobs keeps list scrolling cheap; the full row is
             // re-fetched on demand when an item is copied or previewed.
+            // List rows also carry only a text preview; the WHERE above still
+            // matches against the full text.
+            let textColumn = includePayload
+                ? "text_content"
+                : "substr(text_content, 1, \(Self.listTextPreviewLength))"
             let payloadColumns = includePayload ? "rich_text_data, binary_data" : "NULL, NULL"
             let sql = """
-            SELECT id, type, text_content, \(payloadColumns), file_path, thumbnail_path, source_app_name, source_bundle_id, created_at, updated_at, is_favorite, custom_title, fingerprint
+            SELECT id, type, \(textColumn), \(payloadColumns), file_path, thumbnail_path, source_app_name, source_bundle_id, created_at, updated_at, is_favorite, custom_title, fingerprint
             FROM clipboard_items
             \(whereClause)
             ORDER BY updated_at DESC
@@ -212,27 +263,17 @@ final class PersistenceManager {
         queue.sync {
             let empty = StorageStats(totalItems: 0, totalSizeBytes: 0, oldestItemDate: nil)
             let sql = """
-            SELECT
-                COUNT(*),
-                COALESCE(SUM(
-                    COALESCE(length(binary_data), 0) +
-                    COALESCE(length(rich_text_data), 0) +
-                    COALESCE(length(text_content), 0)
-                ), 0),
-                MIN(created_at)
-            FROM clipboard_items;
+            SELECT COUNT(*), MIN(updated_at) FROM clipboard_items;
             """
             var statement: OpaquePointer?
             guard prepare(sql, into: &statement) else { return empty }
             defer { sqlite3_finalize(statement) }
             guard sqlite3_step(statement) == SQLITE_ROW else { return empty }
 
-            let payloadBytes = sqlite3_column_int64(statement, 1)
-            let dbSizeBytes = ((try? FileManager.default.attributesOfItem(atPath: dbURL.path))?[.size] as? Int64) ?? 0
-            let oldestTimestamp = sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 2)
+            let oldestTimestamp = sqlite3_column_type(statement, 1) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 1)
             return StorageStats(
                 totalItems: Int(sqlite3_column_int(statement, 0)),
-                totalSizeBytes: max(payloadBytes, dbSizeBytes),
+                totalSizeBytes: diskUsageInternal(),
                 oldestItemDate: oldestTimestamp.map(Date.init(timeIntervalSince1970:))
             )
         }
@@ -255,38 +296,72 @@ final class PersistenceManager {
         for pragma in [
             "PRAGMA journal_mode = WAL;",
             "PRAGMA synchronous = NORMAL;",
-            "PRAGMA busy_timeout = 3000;",
-            "PRAGMA temp_store = MEMORY;"
+            "PRAGMA busy_timeout = 3000;"
         ] {
             _ = sqlite3_exec(db, pragma, nil, nil, nil)
         }
     }
 
-    private func createTableIfNeeded() {
-        let sql = """
-        CREATE TABLE IF NOT EXISTS clipboard_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            type TEXT NOT NULL,
-            text_content TEXT,
-            rich_text_data BLOB,
-            binary_data BLOB,
-            file_path TEXT,
-            thumbnail_path TEXT,
-            source_app_name TEXT,
-            source_bundle_id TEXT,
-            created_at DOUBLE NOT NULL,
-            updated_at DOUBLE NOT NULL,
-            is_favorite INTEGER NOT NULL DEFAULT 0,
-            fingerprint TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_clipboard_updated_at ON clipboard_items(updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_clipboard_favorites ON clipboard_items(is_favorite, updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_clipboard_fingerprint ON clipboard_items(fingerprint);
-        """
-        _ = sqlite3_exec(db, sql, nil, nil, nil)
+    private func prepareSchemaInternal() {
+        guard db != nil else { return }
+        guard tableExists() else {
+            // Fresh install: create the final layout directly.
+            let sql = createTableSQL("clipboard_items") + createIndexesSQL + "PRAGMA user_version = \(schemaVersion);"
+            if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
+                NSLog("[Kop] Falha ao criar a tabela: \(String(cString: sqlite3_errmsg(db)))")
+            }
+            return
+        }
+        _ = sqlite3_exec(db, createIndexesSQL, nil, nil, nil)
         if !columnExists("custom_title") {
             _ = sqlite3_exec(db, "ALTER TABLE clipboard_items ADD COLUMN custom_title TEXT;", nil, nil, nil)
         }
+        if userVersion() < schemaVersion, rebuildTableInternal() {
+            compactInternal()
+        }
+    }
+
+    /// Rewrites the table in the blobs-last column order in one transaction;
+    /// on any failure it rolls back and the old layout keeps working.
+    private func rebuildTableInternal() -> Bool {
+        let sql = """
+        BEGIN IMMEDIATE;
+        DROP TABLE IF EXISTS clipboard_items_new;
+        \(createTableSQL("clipboard_items_new"))
+        INSERT INTO clipboard_items_new (\(tableColumns)) SELECT \(tableColumns) FROM clipboard_items;
+        UPDATE sqlite_sequence
+            SET seq = (SELECT MAX(seq) FROM sqlite_sequence WHERE name IN ('clipboard_items', 'clipboard_items_new'))
+            WHERE name = 'clipboard_items_new';
+        INSERT INTO sqlite_sequence (name, seq)
+            SELECT 'clipboard_items_new', seq FROM sqlite_sequence
+            WHERE name = 'clipboard_items'
+              AND NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'clipboard_items_new');
+        DROP TABLE clipboard_items;
+        ALTER TABLE clipboard_items_new RENAME TO clipboard_items;
+        \(createIndexesSQL)
+        PRAGMA user_version = \(schemaVersion);
+        COMMIT;
+        """
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            NSLog("[Kop] Falha ao reorganizar a tabela: \(String(cString: sqlite3_errmsg(db)))")
+            _ = sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return false
+        }
+        return true
+    }
+
+    private func tableExists() -> Bool {
+        var statement: OpaquePointer?
+        guard prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'clipboard_items';", into: &statement) else { return false }
+        defer { sqlite3_finalize(statement) }
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    private func userVersion() -> Int {
+        var statement: OpaquePointer?
+        guard prepare("PRAGMA user_version;", into: &statement) else { return 0 }
+        defer { sqlite3_finalize(statement) }
+        return sqlite3_step(statement) == SQLITE_ROW ? Int(sqlite3_column_int(statement, 0)) : 0
     }
 
     private func columnExists(_ name: String) -> Bool {
@@ -310,7 +385,7 @@ final class PersistenceManager {
         return sqlite3_column_int64(statement, 0)
     }
 
-    private func updateTimestamp(for id: Int64, at date: Date) {
+    private func updateTimestamp(for id: Int64, at date: Date) -> Bool {
         runInternal("UPDATE clipboard_items SET updated_at = ? WHERE id = ?;") { statement in
             sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
             sqlite3_bind_int64(statement, 2, id)
@@ -351,18 +426,52 @@ final class PersistenceManager {
     /// Deletes only files Kop itself generated and that no surviving row still
     /// points at (two entries can share a content-addressed thumbnail).
     private func purgeOrphanFilesInternal(_ candidates: [String]) {
-        let managed = candidates.filter(KopStorage.isManaged)
-        guard !managed.isEmpty else { return }
-        var referenced = Set<String>()
+        let managed = candidates.filter { KopStorage.isManaged($0, in: fileDirectories) }
+        guard !managed.isEmpty, let referenced = referencedPathsInternal() else { return }
+        ImageThumbnail.shared.removeOrphanFiles(paths: managed, stillReferenced: referenced, managedDirectories: fileDirectories)
+    }
+
+    /// Nil when the query failed, so an error is never read as "nothing is
+    /// referenced" (which would delete every file).
+    private func referencedPathsInternal() -> Set<String>? {
         var statement: OpaquePointer?
-        if prepare("SELECT file_path, thumbnail_path FROM clipboard_items;", into: &statement) {
-            while sqlite3_step(statement) == SQLITE_ROW {
-                if let path = stringValue(from: statement, at: 0) { referenced.insert(path) }
-                if let path = stringValue(from: statement, at: 1) { referenced.insert(path) }
+        guard prepare("SELECT file_path, thumbnail_path FROM clipboard_items;", into: &statement) else { return nil }
+        defer { sqlite3_finalize(statement) }
+        var referenced = Set<String>()
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            if let path = stringValue(from: statement, at: 0) { referenced.insert(path) }
+            if let path = stringValue(from: statement, at: 1) { referenced.insert(path) }
+            result = sqlite3_step(statement)
+        }
+        return result == SQLITE_DONE ? referenced : nil
+    }
+
+    /// Removes files no row references, e.g. PNGs exported when an inline image
+    /// is copied back out. Recent files stay: one may still be on the pasteboard.
+    private func sweepOrphanFilesInternal() {
+        guard db != nil else { return }
+        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
+        let manager = FileManager.default
+        let candidates = fileDirectories.flatMap { directory -> [String] in
+            let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
+            return names.map { directory.appendingPathComponent($0).path }.filter { path in
+                let modified = (try? manager.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+                return modified.map { $0 < cutoff } ?? false
             }
         }
-        sqlite3_finalize(statement)
-        ImageThumbnail.shared.removeOrphanFiles(paths: managed, stillReferenced: referenced)
+        purgeOrphanFilesInternal(candidates)
+    }
+
+    /// Database, its WAL and Kop's file folders: what Kop really takes on disk.
+    private func diskUsageInternal() -> Int64 {
+        let manager = FileManager.default
+        let folderFiles = fileDirectories.flatMap { directory in
+            ((try? manager.contentsOfDirectory(atPath: directory.path)) ?? []).map { directory.appendingPathComponent($0).path }
+        }
+        return ([dbURL.path, dbURL.path + "-wal"] + folderFiles).reduce(Int64(0)) { total, path in
+            total + (((try? manager.attributesOfItem(atPath: path))?[.size] as? NSNumber)?.int64Value ?? 0)
+        }
     }
 
     /// SQLite keeps deleted pages inside the file for reuse, so a bulk delete
@@ -381,12 +490,13 @@ final class PersistenceManager {
         queue.sync { runInternal(sql, bind: bind) }
     }
 
-    private func runInternal(_ sql: String, bind: ((OpaquePointer?) -> Void)?) {
+    @discardableResult
+    private func runInternal(_ sql: String, bind: ((OpaquePointer?) -> Void)?) -> Bool {
         var statement: OpaquePointer?
-        guard prepare(sql, into: &statement) else { return }
+        guard prepare(sql, into: &statement) else { return false }
         defer { sqlite3_finalize(statement) }
         bind?(statement)
-        step(statement, context: sql)
+        return step(statement, context: sql)
     }
 
     private func prepare(_ sql: String, into statement: inout OpaquePointer?) -> Bool {
@@ -398,11 +508,14 @@ final class PersistenceManager {
         return true
     }
 
-    private func step(_ statement: OpaquePointer?, context: String) {
+    @discardableResult
+    private func step(_ statement: OpaquePointer?, context: String) -> Bool {
         let result = sqlite3_step(statement)
-        if result != SQLITE_DONE && result != SQLITE_ROW {
+        guard result == SQLITE_DONE || result == SQLITE_ROW else {
             NSLog("[Kop] Falha ao executar (\(context)): \(String(cString: sqlite3_errmsg(db)))")
+            return false
         }
+        return true
     }
 
     private func escapedLike(_ term: String) -> String {

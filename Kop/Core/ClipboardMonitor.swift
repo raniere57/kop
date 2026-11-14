@@ -36,6 +36,9 @@ final class ClipboardMonitor {
     private let pasteboard = NSPasteboard.general
     private let queue = DispatchQueue(label: "kop.clipboard.monitor", qos: .utility)
     private var timer: DispatchSourceTimer?
+    /// Guarded by a lock, not the queue: the queue can be parked waiting on the
+    /// main thread (`askUserToSave`), so the main thread must never `queue.sync`.
+    private let changeCountLock = NSLock()
     private var lastChangeCount: Int
     private var paused = false
 
@@ -66,9 +69,9 @@ final class ClipboardMonitor {
     }
 
     func stop() {
-        queue.sync {
-            timer?.cancel()
-            timer = nil
+        queue.async {
+            self.timer?.cancel()
+            self.timer = nil
         }
     }
 
@@ -81,23 +84,26 @@ final class ClipboardMonitor {
         isPaused = false
         queue.async {
             self.paused = false
-            self.lastChangeCount = self.pasteboard.changeCount
+            self.acknowledgeCurrentPasteboardState()
         }
     }
 
     /// Called after Kop itself writes to the pasteboard so the change is not
     /// captured back into the history.
     func acknowledgeCurrentPasteboardState() {
-        queue.sync {
-            lastChangeCount = pasteboard.changeCount
-        }
+        changeCountLock.lock()
+        lastChangeCount = pasteboard.changeCount
+        changeCountLock.unlock()
     }
 
     private func pollPasteboard() {
         guard !paused else { return }
+        changeCountLock.lock()
         let changeCount = pasteboard.changeCount
-        guard changeCount != lastChangeCount else { return }
+        let isNew = changeCount != lastChangeCount
         lastChangeCount = changeCount
+        changeCountLock.unlock()
+        guard isNew else { return }
 
         guard let item = pasteboard.pasteboardItems?.first else { return }
         guard !isConcealed(item) else { return }
@@ -107,7 +113,7 @@ final class ClipboardMonitor {
         guard !shouldIgnoreSensitiveContent(from: sourceApp, behavior: settings.sensitiveCaptureBehavior) else { return }
 
         guard let capture = capture(item: item, sourceApp: sourceApp, settings: settings) else { return }
-        persistence.save(capture, historyLimit: settings.historyLimit)
+        guard persistence.save(capture, historyLimit: settings.historyLimit) else { return }
 
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .clipboardHistoryChanged, object: nil)
@@ -150,8 +156,13 @@ final class ClipboardMonitor {
             alert.informativeText = "Kop detectou conteúdo copiado de \(appName ?? "um app sensível")."
             alert.addButton(withTitle: "Salvar")
             alert.addButton(withTitle: "Ignorar")
+            // Hand focus back afterwards so the user's next Cmd+V lands where it was.
+            let previousApp = NSWorkspace.shared.frontmostApplication
             NSApp.activate(ignoringOtherApps: true)
             shouldSave = alert.runModal() == .alertFirstButtonReturn
+            if let previousApp, previousApp != NSRunningApplication.current {
+                previousApp.activate(options: [])
+            }
             semaphore.signal()
         }
         semaphore.wait()
@@ -269,9 +280,7 @@ final class ClipboardMonitor {
     }
 
     private func digest(prefix: String, data: Data) -> String {
-        var combined = Data(prefix.utf8)
-        combined.append(data)
-        return kopDigest(combined)
+        kopDigest(prefix: prefix, data: data)
     }
 }
 
