@@ -21,6 +21,7 @@ xcodebuild \
   -scheme "$SCHEME" \
   -configuration Release \
   -derivedDataPath "$DERIVED_DATA" \
+  ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
   build
 
 if [[ ! -d "$APP_PATH" ]]; then
