@@ -18,8 +18,20 @@ enum KopStorage {
     static let images: URL = subdirectory("Images")
     static let thumbnails: URL = subdirectory("Thumbnails")
 
-    static func isManaged(_ path: String) -> Bool {
-        path.hasPrefix(images.path) || path.hasPrefix(thumbnails.path)
+    /// True only for a file strictly inside one of `directories` (default:
+    /// Kop's own folders). `..` is resolved first, and sibling folders such as
+    /// `ImagesBackup` do not match.
+    static func isManaged(_ path: String, in directories: [URL] = [images, thumbnails]) -> Bool {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        return directories.contains { standardized.hasPrefix($0.standardizedFileURL.path + "/") }
+    }
+
+    /// Returns true when `url` already exists, bumping its modification date
+    /// so the launch orphan sweep (24 h rule) treats a reused file as fresh.
+    static func reuseIfExists(_ url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        return true
     }
 
     private static func subdirectory(_ name: String) -> URL {
@@ -102,7 +114,7 @@ enum ClipboardImageBridge {
 
     private static func exportPNG(_ pngData: Data) -> String? {
         let url = KopStorage.images.appendingPathComponent("\(kopDigest(pngData)).png")
-        if FileManager.default.fileExists(atPath: url.path) { return url.path }
+        if KopStorage.reuseIfExists(url) { return url.path }
         do {
             try pngData.write(to: url, options: .atomic)
             return url.path
@@ -138,7 +150,7 @@ final class ImageThumbnail {
     func persistThumbnail(for data: Data) -> String? {
         autoreleasepool {
             let url = KopStorage.thumbnails.appendingPathComponent("\(kopDigest(data)).png")
-            if FileManager.default.fileExists(atPath: url.path) { return url.path }
+            if KopStorage.reuseIfExists(url) { return url.path }
 
             guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
             let options: [CFString: Any] = [
@@ -208,8 +220,8 @@ final class ImageThumbnail {
 
     /// Removes files Kop generated for paths that no history row references
     /// anymore. Files the user owns (outside Kop's storage) are never touched.
-    func removeOrphanFiles(paths: [String], stillReferenced: Set<String>) {
-        for path in paths where KopStorage.isManaged(path) && !stillReferenced.contains(path) {
+    func removeOrphanFiles(paths: [String], stillReferenced: Set<String>, managedDirectories: [URL]) {
+        for path in paths where KopStorage.isManaged(path, in: managedDirectories) && !stillReferenced.contains(path) {
             cache.removeObject(forKey: path as NSString)
             try? FileManager.default.removeItem(atPath: path)
         }

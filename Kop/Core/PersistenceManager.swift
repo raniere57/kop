@@ -332,6 +332,10 @@ final class PersistenceManager {
         UPDATE sqlite_sequence
             SET seq = (SELECT MAX(seq) FROM sqlite_sequence WHERE name IN ('clipboard_items', 'clipboard_items_new'))
             WHERE name = 'clipboard_items_new';
+        INSERT INTO sqlite_sequence (name, seq)
+            SELECT 'clipboard_items_new', seq FROM sqlite_sequence
+            WHERE name = 'clipboard_items'
+              AND NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'clipboard_items_new');
         DROP TABLE clipboard_items;
         ALTER TABLE clipboard_items_new RENAME TO clipboard_items;
         \(createIndexesSQL)
@@ -422,9 +426,9 @@ final class PersistenceManager {
     /// Deletes only files Kop itself generated and that no surviving row still
     /// points at (two entries can share a content-addressed thumbnail).
     private func purgeOrphanFilesInternal(_ candidates: [String]) {
-        let managed = candidates.filter(KopStorage.isManaged)
+        let managed = candidates.filter { KopStorage.isManaged($0, in: fileDirectories) }
         guard !managed.isEmpty, let referenced = referencedPathsInternal() else { return }
-        ImageThumbnail.shared.removeOrphanFiles(paths: managed, stillReferenced: referenced)
+        ImageThumbnail.shared.removeOrphanFiles(paths: managed, stillReferenced: referenced, managedDirectories: fileDirectories)
     }
 
     /// Nil when the query failed, so an error is never read as "nothing is
