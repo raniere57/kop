@@ -115,7 +115,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             let alert = NSAlert()
             alert.messageText = "Não foi possível registrar \(shortcut.displayString)"
-            alert.informativeText = "Outro app já usa esse atalho. Escolha outra combinação nas Preferências."
+            // HotkeyManager rejects modifier-less shortcuts (older versions
+            // allowed Shift alone) before asking the system.
+            alert.informativeText = shortcut.hasModifier
+                ? "Outro app já usa esse atalho. Escolha outra combinação nas Preferências."
+                : "O atalho precisa usar ⌘, ⌥ ou ⌃. Defina-o novamente nas Preferências."
             alert.alertStyle = .warning
             alert.runModal()
             openPreferences()
@@ -136,8 +140,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        // VACUUM can take seconds: keep the main thread free. The panel and
-        // the preferences stats refresh through the notification.
+        // VACUUM can take seconds: keep the main thread free. The panel (when
+        // visible) and the Preferences stats (when its window is open) refresh
+        // through the notification.
         let persistence = persistence
         Task {
             await runOffMain { persistence.clearNonFavoriteItems() }

@@ -32,7 +32,20 @@ final class PreferencesViewModel: ObservableObject {
         preferences.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &cancellables)
+
+        // Captures and panel deletes change the stats too; only re-read them
+        // while the window is on screen (`show` refreshes on open anyway).
+        NotificationCenter.default.publisher(for: .clipboardHistoryChanged)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.isWindowVisible else { return }
+                self.refresh()
+            }
+            .store(in: &cancellables)
     }
+
+    /// Set by `PreferencesWindowController` on show and close.
+    var isWindowVisible = false
 
     func refresh() {
         storageStats = persistence.fetchStorageStats()

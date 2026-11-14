@@ -31,6 +31,9 @@ final class ClipboardHistoryViewModel: ObservableObject {
     @Published var listFilter: ClipboardListFilter = .all
     /// Non-nil while an image is shown expanded over the list.
     @Published private(set) var expandedItem: ClipboardEntry?
+    /// Decoded together with `expandedItem` (same update), so the lightbox
+    /// never renders a frame without an image. Released on collapse.
+    @Published private(set) var expandedImage: NSImage?
 
     private let persistence: PersistenceManager
     private let preferences: PreferencesStore
@@ -82,11 +85,17 @@ final class ClipboardHistoryViewModel: ObservableObject {
 
     // MARK: - Loading
 
-    /// A new search or filter starts from the first page; any other reload
-    /// (capture, favorite, rename) refetches everything already loaded so the
-    /// user keeps their place.
-    func reload(searchTerm: String? = nil, filter: ClipboardListFilter? = nil) {
-        let isNewQuery = searchTerm != nil || filter != nil
+    /// Opening the panel always starts fresh: first page, first row.
+    func reloadForShow() {
+        selectedItemID = nil
+        reload(fromTop: true)
+    }
+
+    /// A new search, filter or panel open starts from the first page; any
+    /// other reload (capture, favorite, rename, delete while visible)
+    /// refetches everything already loaded so the user keeps their place.
+    func reload(searchTerm: String? = nil, filter: ClipboardListFilter? = nil, fromTop: Bool = false) {
+        let isNewQuery = fromTop || searchTerm != nil || filter != nil
         let limit = isNewQuery ? pageSize : max(items.count, pageSize)
         let freshItems = fetchPage(
             offset: 0,
@@ -165,9 +174,14 @@ final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     func copy(item: ClipboardEntry, plainTextOnly: Bool, autoPaste: Bool) {
+        // List rows are truncated previews: without the full row, write
+        // nothing rather than cut text.
+        guard let resolved = resolvedItemForCopy(item) else {
+            NSSound.beep()
+            reload()
+            return
+        }
         NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
-
-        let resolved = resolvedItemForCopy(item)
         write(resolved, plainTextOnly: plainTextOnly)
         // Kop wrote the pasteboard itself, so tell the monitor to skip this
         // change and promote the row directly instead of re-capturing it.
@@ -290,11 +304,18 @@ final class ClipboardHistoryViewModel: ObservableObject {
     func expand(item: ClipboardEntry) {
         guard item.type == .image else { return }
         selectedItemID = item.id
-        expandedItem = withPayload(item)
+        showExpanded(item)
     }
 
     func collapse() {
         expandedItem = nil
+        expandedImage = nil
+    }
+
+    private func showExpanded(_ item: ClipboardEntry) {
+        let full = withPayload(item)
+        expandedImage = ImageThumbnail.shared.originalOrThumbnail(for: full)
+        expandedItem = full
     }
 
     /// Moves through the image items only — stepping onto a text entry would
@@ -307,7 +328,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
         guard images.indices.contains(target) else { return }
         let next = images[target]
         selectedItemID = next.id
-        self.expandedItem = withPayload(next)
+        showExpanded(next)
         // Keep paging so the expanded view can reach older images.
         if let last = items.last, target >= images.count - 2 {
             loadMoreIfNeeded(currentItem: last)
@@ -370,7 +391,8 @@ final class ClipboardHistoryViewModel: ObservableObject {
 
     /// List rows carry no blobs and only a truncated text preview, so every
     /// type is re-read in full before it reaches the pasteboard.
-    private func resolvedItemForCopy(_ item: ClipboardEntry) -> ClipboardEntry {
-        persistence.fetchItem(id: item.id) ?? item
+    /// Nil when the row is gone or unreadable.
+    private func resolvedItemForCopy(_ item: ClipboardEntry) -> ClipboardEntry? {
+        persistence.fetchItem(id: item.id)
     }
 }

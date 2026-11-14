@@ -13,6 +13,7 @@ struct KopPanelView: View {
                 // it reliably.
                 ImageLightboxView(
                     item: expanded,
+                    image: viewModel.expandedImage,
                     position: viewModel.expandedPosition,
                     onPrevious: { viewModel.stepExpanded(by: -1) },
                     onNext: { viewModel.stepExpanded(by: 1) },

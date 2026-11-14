@@ -138,7 +138,7 @@ final class PanelController: NSWindowController, NSWindowDelegate {
             viewModel.pasteTargetApp = frontmost
         }
         viewModel.isPanelVisible = true
-        viewModel.reload()
+        viewModel.reloadForShow()
         position(panel: panel)
 
         let finalFrame = panel.frame

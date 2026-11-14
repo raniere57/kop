@@ -24,6 +24,13 @@ final class PreferencesWindowController: NSWindowController {
         window.center()
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak viewModel] _ in
+            MainActor.assumeIsolated { viewModel?.isWindowVisible = false }
+        }
     }
 
     @available(*, unavailable)
@@ -34,6 +41,7 @@ final class PreferencesWindowController: NSWindowController {
     func show() {
         guard let window else { return }
         // The window is reused, so stats must be re-read on every show.
+        viewModel.isWindowVisible = true
         viewModel.refresh()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
