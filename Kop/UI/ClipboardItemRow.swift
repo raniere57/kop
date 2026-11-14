@@ -4,47 +4,102 @@ import SwiftUI
 struct ClipboardItemRow: View {
     let item: ClipboardEntry
     let isSelected: Bool
+    var shortcutIndex: Int?
+    var onToggleFavorite: () -> Void
+    var onExpandImage: () -> Void = {}
+
+    @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 11) {
             thumbnail
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.displayTitle)
+                .frame(width: 40, height: 40)
+                // Inner gesture wins over the row's, so clicking the picture
+                // expands instead of pasting.
+                .onTapGesture { if item.type == .image { onExpandImage() } }
+                .help(item.type == .image ? "Clique para expandir" : "")
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(displayTitle)
                     .font(.system(size: 13, weight: item.customTitle == nil ? .regular : .semibold))
                     .lineLimit(item.customTitle == nil ? 2 : 1)
-                    .foregroundStyle(.primary)
-                if let secondaryPreviewText = item.secondaryPreviewText {
-                    Text(secondaryPreviewText)
-                        .font(.system(size: 12))
+                    .truncationMode(.tail)
+
+                if let secondary = item.secondaryPreviewText {
+                    Text(secondary.singleLine)
+                        .font(.system(size: 11))
                         .lineLimit(1)
                         .foregroundStyle(.secondary)
                 }
-                HStack(spacing: 6) {
-                    if let appIcon = AppIconFetcher.icon(for: item.sourceBundleIdentifier, appName: item.sourceAppName) {
-                        Image(nsImage: appIcon)
-                            .resizable()
-                            .frame(width: 14, height: 14)
-                    }
-                    Text(item.sourceAppName ?? "Origem desconhecida")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Text(RelativeDateTimeFormatter.kop.localizedString(for: item.updatedAt, relativeTo: Date()))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    if item.isFavorite {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.yellow)
-                    }
-                }
+
+                metadata
             }
-            Spacer(minLength: 0)
+
+            Spacer(minLength: 4)
+            trailingAccessories
         }
-        .padding(10)
-        .background(
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(background)
+        .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.white.opacity(0.05))
+                .strokeBorder(Color.accentColor.opacity(isSelected ? 0.55 : 0), lineWidth: 1)
         )
+        .onHover { isHovering = $0 }
+    }
+
+    private var displayTitle: String {
+        item.customTitle?.isEmpty == false ? item.displayTitle : item.previewText.singleLine
+    }
+
+    private var background: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(
+                isSelected
+                    ? Color.accentColor.opacity(0.18)
+                    : Color.primary.opacity(isHovering ? 0.08 : 0.04)
+            )
+    }
+
+    private var metadata: some View {
+        HStack(spacing: 5) {
+            if let appIcon = AppIconFetcher.icon(for: item.sourceBundleIdentifier, appName: item.sourceAppName) {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .frame(width: 12, height: 12)
+            }
+            Text(item.sourceAppName ?? "Origem desconhecida")
+                .lineLimit(1)
+            Text("·")
+            Text(RelativeDateTimeFormatter.kop.localizedString(for: item.updatedAt, relativeTo: Date()))
+                .lineLimit(1)
+            if let badge = item.typeBadge, badge != displayTitle {
+                Text("·")
+                Text(badge)
+            }
+        }
+        .font(.system(size: 10.5))
+        .foregroundStyle(.tertiary)
+    }
+
+    @ViewBuilder
+    private var trailingAccessories: some View {
+        HStack(spacing: 6) {
+            if let shortcutIndex, !isHovering {
+                Text("⌘\(shortcutIndex)")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+            Button(action: onToggleFavorite) {
+                Image(systemName: item.isFavorite ? "star.fill" : "star")
+                    .font(.system(size: 12))
+                    .foregroundStyle(item.isFavorite ? Color.yellow : Color.secondary)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(item.isFavorite || isHovering ? 1 : 0)
+            .help(item.isFavorite ? "Remover favorito" : "Favoritar")
+        }
     }
 
     @ViewBuilder
@@ -54,38 +109,58 @@ struct ClipboardItemRow: View {
             if let image = ImageThumbnail.shared.thumbnailImage(for: item) {
                 Image(nsImage: image)
                     .resizable()
-                    .scaledToFill()
-                    .frame(width: 42, height: 42)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 40, height: 40)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else {
-                fallbackIcon(systemName: "photo")
+                fallbackIcon("photo")
             }
         case .fileURL:
             if let path = item.filePath {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: path))
                     .resizable()
-                    .frame(width: 34, height: 34)
+                    .aspectRatio(contentMode: .fit)
             } else {
-                fallbackIcon(systemName: "doc")
+                fallbackIcon("doc")
             }
         case .pdf:
-            fallbackIcon(systemName: "doc.richtext")
+            fallbackIcon("doc.richtext")
         case .richText:
-            fallbackIcon(systemName: "text.alignleft")
+            fallbackIcon("textformat")
         case .plainText:
-            fallbackIcon(systemName: "doc.on.doc")
+            fallbackIcon("text.alignleft")
         }
     }
 
-    private func fallbackIcon(systemName: String) -> some View {
+    private func fallbackIcon(_ systemName: String) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.secondary.opacity(0.12))
-                .frame(width: 42, height: 42)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.07))
             Image(systemName: systemName)
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+private extension ClipboardEntry {
+    var typeBadge: String? {
+        switch type {
+        case .plainText, .richText: return nil
+        case .image: return "Imagem"
+        case .fileURL: return "Arquivo"
+        case .pdf: return "PDF"
+        }
+    }
+}
+
+extension String {
+    /// Collapses newlines/tabs so multi-line snippets stay on one row.
+    var singleLine: String {
+        split(whereSeparator: \.isNewline)
+            .joined(separator: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .trimmingCharacters(in: .whitespaces)
     }
 }
 

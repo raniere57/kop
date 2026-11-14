@@ -1,6 +1,7 @@
 import AppKit
 
-final class StatusItemController: NSObject {
+@MainActor
+final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let panelAction: () -> Void
     private let clearAction: () -> Void
@@ -8,6 +9,7 @@ final class StatusItemController: NSObject {
     private let pauseAction: () -> Void
     private let quitAction: () -> Void
     private let isPaused: () -> Bool
+    private let hotkeyDescription: () -> String
 
     init(
         panelAction: @escaping () -> Void,
@@ -15,7 +17,8 @@ final class StatusItemController: NSObject {
         preferencesAction: @escaping () -> Void,
         pauseAction: @escaping () -> Void,
         quitAction: @escaping () -> Void,
-        isPaused: @escaping () -> Bool
+        isPaused: @escaping () -> Bool,
+        hotkeyDescription: @escaping () -> String
     ) {
         self.panelAction = panelAction
         self.clearAction = clearAction
@@ -23,17 +26,26 @@ final class StatusItemController: NSObject {
         self.pauseAction = pauseAction
         self.quitAction = quitAction
         self.isPaused = isPaused
+        self.hotkeyDescription = hotkeyDescription
         super.init()
         configureStatusItem()
     }
 
     func refreshMenuState() {
-        statusItem.menu = makeMenu()
+        guard let button = statusItem.button else { return }
+        let paused = isPaused()
+        button.image = NSImage(
+            systemSymbolName: paused ? "clipboard.fill" : "clipboard",
+            accessibilityDescription: paused ? "Kop (pausado)" : "Kop"
+        )
+        button.appearsDisabled = paused
+        button.toolTip = paused
+            ? "Kop — monitoramento pausado"
+            : "Kop — \(hotkeyDescription()) para abrir"
     }
 
     private func configureStatusItem() {
         guard let button = statusItem.button else { return }
-        button.image = NSImage(systemSymbolName: "clipboard", accessibilityDescription: "Kop")
         button.imagePosition = .imageOnly
         button.target = self
         button.action = #selector(handleStatusItemClick)
@@ -43,32 +55,36 @@ final class StatusItemController: NSObject {
 
     @objc private func handleStatusItemClick() {
         guard let event = NSApp.currentEvent else { return }
-        if event.type == .rightMouseUp {
-            statusItem.menu = makeMenu()
-            statusItem.button?.performClick(nil)
-            statusItem.menu = nil
-        } else {
+        let wantsMenu = event.type == .rightMouseUp
+            || event.modifierFlags.contains(.control)
+        guard wantsMenu else {
             panelAction()
+            return
         }
+        // Attaching the menu only for this click keeps left-click opening the panel.
+        let menu = makeMenu()
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
     }
 
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(withTitle: "Abrir Kop", action: #selector(openPanel), keyEquivalent: "")
-        menu.addItem(withTitle: "Limpar histórico", action: #selector(clearHistory), keyEquivalent: "")
-        let pauseTitle = isPaused() ? "Retomar monitoramento" : "Pausar monitoramento"
-        menu.addItem(withTitle: pauseTitle, action: #selector(togglePause), keyEquivalent: "")
+        let open = menu.addItem(withTitle: "Abrir Kop", action: #selector(openPanel), keyEquivalent: "")
+        open.toolTip = hotkeyDescription()
+        menu.addItem(withTitle: isPaused() ? "Retomar monitoramento" : "Pausar monitoramento", action: #selector(togglePause), keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Preferências", action: #selector(openPreferences), keyEquivalent: ",")
+        menu.addItem(withTitle: "Limpar histórico…", action: #selector(clearHistory), keyEquivalent: "")
+        menu.addItem(withTitle: "Preferências…", action: #selector(openPreferences), keyEquivalent: ",")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Sair", action: #selector(quitApp), keyEquivalent: "q")
+        menu.addItem(withTitle: "Sair do Kop", action: #selector(quitApp), keyEquivalent: "q")
         menu.items.forEach { $0.target = self }
         return menu
     }
 
     @objc private func openPanel() { panelAction() }
     @objc private func clearHistory() { clearAction() }
-    @objc private func togglePause() { pauseAction(); refreshMenuState() }
+    @objc private func togglePause() { pauseAction() }
     @objc private func openPreferences() { preferencesAction() }
     @objc private func quitApp() { quitAction() }
 }

@@ -1,8 +1,9 @@
 import Foundation
 
-extension Notification.Name {
-    static let clipboardHistoryChanged = Notification.Name("kop.clipboardHistoryChanged")
-    static let closeClipboardPanel = Notification.Name("kop.closeClipboardPanel")
-    static let openPreferencesWindow = Notification.Name("kop.openPreferencesWindow")
-    static let preferencesHotkeyChanged = Notification.Name("kop.preferencesHotkeyChanged")
+extension NSNotification.Name {
+    static let clipboardHistoryChanged = NSNotification.Name("clipboardHistoryChanged")
+    static let preferencesHotkeyChanged = NSNotification.Name("preferencesHotkeyChanged")
+    static let preferencesThemeChanged = NSNotification.Name("preferencesThemeChanged")
+    static let closeClipboardPanel = NSNotification.Name("closeClipboardPanel")
+    static let openPreferencesWindow = NSNotification.Name("openPreferencesWindow")
 }

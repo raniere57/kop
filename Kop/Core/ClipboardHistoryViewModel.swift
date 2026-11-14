@@ -14,6 +14,13 @@ enum ClipboardListFilter: String, CaseIterable, Identifiable {
         case .favorites: return "Favoritos"
         }
     }
+
+    var symbolName: String {
+        switch self {
+        case .all: return "clock"
+        case .favorites: return "star.fill"
+        }
+    }
 }
 
 @MainActor
@@ -22,6 +29,8 @@ final class ClipboardHistoryViewModel: ObservableObject {
     @Published var searchText = ""
     @Published var selectedItemID: Int64?
     @Published var listFilter: ClipboardListFilter = .all
+    /// Non-nil while an image is shown expanded over the list.
+    @Published private(set) var expandedItem: ClipboardEntry?
 
     private let persistence: PersistenceManager
     private let preferences: PreferencesStore
@@ -37,12 +46,15 @@ final class ClipboardHistoryViewModel: ObservableObject {
         self.clipboardMonitor = clipboardMonitor
 
         NotificationCenter.default.publisher(for: .clipboardHistoryChanged)
-            .sink { [weak self] _ in
-                self?.reload()
-            }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.reload() }
             .store(in: &cancellables)
 
+        // `dropFirst` + `removeDuplicates` keep the panel from issuing three
+        // identical queries every time it opens.
         $searchText
+            .removeDuplicates()
+            .dropFirst()
             .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
             .sink { [weak self] searchText in
                 self?.reload(searchTerm: searchText)
@@ -51,6 +63,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
 
         $listFilter
             .removeDuplicates()
+            .dropFirst()
             .sink { [weak self] listFilter in
                 self?.reload(filter: listFilter)
             }
@@ -59,103 +72,176 @@ final class ClipboardHistoryViewModel: ObservableObject {
         reload()
     }
 
+    // MARK: - Loading
+
     func reload(searchTerm: String? = nil, filter: ClipboardListFilter? = nil) {
         currentOffset = 0
         let freshItems = fetchPage(
             offset: 0,
-            searchTerm: searchTerm ?? self.searchText,
-            filter: filter ?? self.listFilter
+            searchTerm: searchTerm ?? searchText,
+            filter: filter ?? listFilter
         )
+        let previousSelection = selectedItemID
         items = freshItems
-        selectedItemID = freshItems.first?.id
         hasMore = freshItems.count == pageSize
+        // Keep the user's place: a new clipboard capture must not yank the
+        // selection back to the top while they are navigating.
+        if let previousSelection, freshItems.contains(where: { $0.id == previousSelection }) {
+            selectedItemID = previousSelection
+        } else {
+            selectedItemID = freshItems.first?.id
+        }
     }
 
     func loadMoreIfNeeded(currentItem: ClipboardEntry) {
         guard hasMore, currentItem.id == items.last?.id else { return }
         currentOffset += pageSize
-        let nextPage = fetchPage(
-            offset: currentOffset,
-            searchTerm: searchText,
-            filter: listFilter
-        )
+        let nextPage = fetchPage(offset: currentOffset, searchTerm: searchText, filter: listFilter)
         hasMore = nextPage.count == pageSize
         items.append(contentsOf: nextPage)
     }
 
+    // MARK: - Selection
+
     func selectNext() {
-        guard !items.isEmpty else { return }
-        guard let selectedItemID,
-              let currentIndex = items.firstIndex(where: { $0.id == selectedItemID }) else {
-            self.selectedItemID = items.first?.id
-            return
-        }
-        self.selectedItemID = items[min(currentIndex + 1, items.count - 1)].id
+        move(by: 1)
     }
 
     func selectPrevious() {
+        move(by: -1)
+    }
+
+    func selectFirst() {
+        selectedItemID = items.first?.id
+    }
+
+    func selectLast() {
+        selectedItemID = items.last?.id
+    }
+
+    /// Used by ⌘1…⌘9.
+    func activateItem(at index: Int) {
+        guard items.indices.contains(index) else { return }
+        selectedItemID = items[index].id
+        activateSelectedItem()
+    }
+
+    private func move(by offset: Int) {
         guard !items.isEmpty else { return }
         guard let selectedItemID,
               let currentIndex = items.firstIndex(where: { $0.id == selectedItemID }) else {
             self.selectedItemID = items.first?.id
             return
         }
-        self.selectedItemID = items[max(currentIndex - 1, 0)].id
+        let target = min(max(currentIndex + offset, 0), items.count - 1)
+        self.selectedItemID = items[target].id
+        if let last = items.last, target >= items.count - 3 {
+            loadMoreIfNeeded(currentItem: last)
+        }
     }
 
-    func activateSelectedItem() {
+    var selectedItem: ClipboardEntry? {
+        guard let selectedItemID else { return items.first }
+        return items.first(where: { $0.id == selectedItemID })
+    }
+
+    // MARK: - Actions
+
+    func activateSelectedItem(plainTextOnly: Bool = false) {
         guard let selected = selectedItem else { return }
-        copy(item: selected, plainTextOnly: false, autoPaste: false)
+        copy(item: selected, plainTextOnly: plainTextOnly, autoPaste: preferences.pasteOnSelect)
     }
 
     func copy(item: ClipboardEntry, plainTextOnly: Bool, autoPaste: Bool) {
         NotificationCenter.default.post(name: .closeClipboardPanel, object: nil)
 
-        DispatchQueue.main.async {
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
+        let resolved = resolvedItemForCopy(item)
+        write(resolved, plainTextOnly: plainTextOnly)
+        // Kop wrote the pasteboard itself, so tell the monitor to skip this
+        // change and promote the row directly instead of re-capturing it.
+        clipboardMonitor.acknowledgeCurrentPasteboardState()
+        persistence.touch(id: resolved.id)
+        // The monitor skips Kop's own write, so the feedback sound is played here.
+        preferences.soundName.play()
 
-            switch item.type {
-            case .plainText, .fileURL, .pdf:
-                if let text = item.textContent ?? item.filePath {
-                    pasteboard.setString(text, forType: .string)
-                } else if let data = item.binaryData {
-                    pasteboard.setData(data, forType: .pdf)
-                }
-            case .richText:
-                if plainTextOnly {
-                    pasteboard.setString(item.textContent ?? "", forType: .string)
-                } else if let richTextData = item.richTextData {
-                    pasteboard.setData(richTextData, forType: .rtf)
-                    if let textContent = item.textContent {
-                        pasteboard.setString(textContent, forType: .string)
-                    }
-                }
-            case .image:
-                if let data = item.binaryData {
-                    pasteboard.setData(data, forType: .png)
-                } else if let thumbnailPath = item.thumbnailPath,
-                          let data = try? Data(contentsOf: URL(fileURLWithPath: thumbnailPath)) {
-                    pasteboard.setData(data, forType: .png)
-                }
+        guard autoPaste else { return }
+        guard AccessibilityPermission.ensureGranted() else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            PasteSimulator.simulatePaste()
+        }
+    }
+
+    private func write(_ item: ClipboardEntry, plainTextOnly: Bool) {
+        let pasteboard = NSPasteboard.general
+
+        switch item.type {
+        case .plainText:
+            pasteboard.clearContents()
+            pasteboard.setString(item.textContent ?? "", forType: .string)
+
+        case .fileURL:
+            pasteboard.clearContents()
+            if let path = item.filePath {
+                // Writing the URL object is what makes Finder/Mail accept the paste.
+                pasteboard.writeObjects([URL(fileURLWithPath: path) as NSURL])
+                pasteboard.setString(path, forType: .string)
+            } else {
+                pasteboard.setString(item.textContent ?? "", forType: .string)
             }
 
-            if autoPaste {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    PasteSimulator.simulatePaste()
+        case .pdf:
+            pasteboard.clearContents()
+            if let data = item.binaryData {
+                pasteboard.setData(data, forType: .pdf)
+            } else if let path = item.filePath {
+                pasteboard.writeObjects([URL(fileURLWithPath: path) as NSURL])
+            }
+
+        case .richText:
+            pasteboard.clearContents()
+            if plainTextOnly {
+                pasteboard.setString(item.textContent ?? "", forType: .string)
+            } else if let richTextData = item.richTextData {
+                pasteboard.setData(richTextData, forType: .rtf)
+                if let textContent = item.textContent {
+                    pasteboard.setString(textContent, forType: .string)
                 }
+            } else {
+                pasteboard.setString(item.textContent ?? "", forType: .string)
+            }
+
+        case .image:
+            if let payload = ClipboardImageBridge.preparePayload(
+                imageData: item.binaryData,
+                preferredFilePath: item.filePath,
+                fallbackThumbnailPath: item.thumbnailPath
+            ) {
+                ClipboardImageBridge.publish(payload, to: pasteboard)
             }
         }
     }
 
     func delete(item: ClipboardEntry) {
+        let wasSelected = selectedItemID == item.id
+        let nextID = wasSelected ? neighborID(of: item.id) : selectedItemID
         persistence.delete(id: item.id)
+        selectedItemID = nextID
         reload()
+    }
+
+    func deleteSelected() {
+        guard let selectedItem else { return }
+        delete(item: selectedItem)
     }
 
     func toggleFavorite(item: ClipboardEntry) {
         persistence.setFavorite(id: item.id, isFavorite: !item.isFavorite)
         reload()
+    }
+
+    func toggleFavoriteSelected() {
+        guard let selectedItem else { return }
+        toggleFavorite(item: selectedItem)
     }
 
     func updateCustomTitle(item: ClipboardEntry, title: String) {
@@ -164,47 +250,119 @@ final class ClipboardHistoryViewModel: ObservableObject {
         reload()
     }
 
-    var selectedItem: ClipboardEntry? {
-        guard let selectedItemID else { return items.first }
-        return items.first(where: { $0.id == selectedItemID })
+    func previewSelected() {
+        guard let selectedItem else { return }
+        PreviewWindowController.shared.show(item: selectedItem)
+    }
+
+    // MARK: - Expanded image
+
+    var imageItems: [ClipboardEntry] {
+        items.filter { $0.type == .image }
+    }
+
+    /// Position of the expanded image among the images currently listed.
+    var expandedPosition: (index: Int, total: Int)? {
+        guard let expandedItem else { return nil }
+        let images = imageItems
+        guard let index = images.firstIndex(where: { $0.id == expandedItem.id }) else { return nil }
+        return (index + 1, images.count)
+    }
+
+    func expand(item: ClipboardEntry) {
+        guard item.type == .image else { return }
+        selectedItemID = item.id
+        expandedItem = withPayload(item)
+    }
+
+    func collapse() {
+        expandedItem = nil
+    }
+
+    /// Moves through the image items only — stepping onto a text entry would
+    /// leave nothing to show.
+    func stepExpanded(by offset: Int) {
+        guard let expandedItem else { return }
+        let images = imageItems
+        guard let current = images.firstIndex(where: { $0.id == expandedItem.id }) else { return }
+        let target = current + offset
+        guard images.indices.contains(target) else { return }
+        let next = images[target]
+        selectedItemID = next.id
+        self.expandedItem = withPayload(next)
+        // Keep paging so the expanded view can reach older images.
+        if let last = items.last, target >= images.count - 2 {
+            loadMoreIfNeeded(currentItem: last)
+        }
+    }
+
+    func copyExpanded(autoPaste: Bool) {
+        guard let expandedItem else { return }
+        copy(item: expandedItem, plainTextOnly: false, autoPaste: autoPaste)
+    }
+
+    /// List rows come without blobs, so the full-size image has to be read
+    /// back from the database — a thumbnail path is not enough here.
+    private func withPayload(_ item: ClipboardEntry) -> ClipboardEntry {
+        if item.binaryData != nil { return item }
+        if let path = item.filePath, FileManager.default.fileExists(atPath: path) { return item }
+        return persistence.fetchItem(id: item.id) ?? item
+    }
+
+    // MARK: - Empty state
+
+    var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var emptyStateTitle: String {
         if listFilter == .favorites {
-            return searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "Nenhum favorito salvo"
-                : "Nenhum favorito encontrado"
+            return isSearching ? "Nenhum favorito encontrado" : "Nenhum favorito salvo"
         }
-        return "Nenhum item encontrado"
+        return isSearching ? "Nada encontrado" : "Histórico vazio"
     }
 
     var emptyStateMessage: String {
         if listFilter == .favorites {
             return "Favorite itens importantes para encontrá-los mais rápido."
         }
-        return "Tente ajustar a busca para encontrar uma cópia anterior."
+        return isSearching
+            ? "Tente outro termo de busca."
+            : "Copie algo em qualquer app e o item aparece aqui."
+    }
+
+    // MARK: - Helpers
+
+    private func neighborID(of id: Int64) -> Int64? {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return nil }
+        if items.indices.contains(index + 1) { return items[index + 1].id }
+        if items.indices.contains(index - 1) { return items[index - 1].id }
+        return nil
     }
 
     private func fetchPage(offset: Int, searchTerm: String, filter: ClipboardListFilter) -> [ClipboardEntry] {
-        if filter == .favorites {
-            let scanLimit = max(preferences.historyLimit ?? 5_000, pageSize)
-            let allItems = persistence.fetchItems(
-                offset: 0,
-                limit: scanLimit,
-                searchTerm: searchTerm,
-                favoritesOnly: false
-            )
-            let favorites = allItems.filter(\.isFavorite)
-            guard offset < favorites.count else { return [] }
-            let endIndex = min(offset + pageSize, favorites.count)
-            return Array(favorites[offset..<endIndex])
-        }
-
-        return persistence.fetchItems(
+        persistence.fetchItems(
             offset: offset,
             limit: pageSize,
             searchTerm: searchTerm,
-            favoritesOnly: false
+            favoritesOnly: filter == .favorites,
+            includePayload: false
         )
+    }
+
+    /// List rows are fetched without blobs; anything needing the payload gets
+    /// the full row here.
+    private func resolvedItemForCopy(_ item: ClipboardEntry) -> ClipboardEntry {
+        switch item.type {
+        case .plainText, .fileURL:
+            return item
+        case .richText:
+            if item.richTextData != nil { return item }
+        case .image:
+            if item.binaryData != nil || item.filePath != nil { return item }
+        case .pdf:
+            if item.binaryData != nil { return item }
+        }
+        return persistence.fetchItem(id: item.id) ?? item
     }
 }

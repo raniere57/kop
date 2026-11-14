@@ -2,6 +2,20 @@
 
 Kop e um gerenciador de area de transferencia nativo para macOS, feito em SwiftUI + AppKit, focado em abrir rapido pela barra de menu com `Option + Space`.
 
+## Atalhos do painel
+
+| Atalho | Acao |
+| --- | --- |
+| `Option + Space` | abrir/fechar o painel (configuravel) |
+| `↑` / `↓` | navegar pela lista |
+| `Return` | colar (ou apenas copiar, conforme preferencia) |
+| `Shift + Return` | colar como texto puro |
+| `Cmd + 1` … `Cmd + 9` | usar direto o item da posicao |
+| `Cmd + D` | favoritar / desfavoritar |
+| `Cmd + Y` | visualizar |
+| `Cmd + Delete` | apagar item |
+| `Esc` | fechar |
+
 ## Requisitos
 
 - macOS 13 Ventura ou superior
@@ -67,7 +81,27 @@ Isso copia o app para `/Applications/Kop.app`, remove quarentena, registra no La
 
 - Clipboard: acesso via `NSPasteboard`
 - Hotkey global: registrado com Carbon `RegisterEventHotKey`
-- Accessibility: necessaria apenas para a acao "Copiar e Colar", que envia `Cmd + V`
+- Accessibility: necessaria apenas para colar automaticamente (envia `Cmd + V`). Sem ela o item so e copiado, e o Kop avisa uma vez com um atalho para os Ajustes.
+
+Conteudo marcado como confidencial (`org.nspasteboard.ConcealedType` e afins, usado por gerenciadores de senha) nunca e gravado no historico.
+
+## Armazenamento
+
+Tudo que o Kop grava fica em `~/Library/Application Support/Kop`:
+
+- `history.sqlite` (WAL) com o historico
+- `Images/` com PNGs gerados para itens de imagem
+- `Thumbnails/` com as miniaturas da lista
+
+Arquivos gerados sao apagados junto com o item do historico. Arquivos que pertencem ao usuario nunca sao removidos.
+
+## Teste rapido
+
+Checagem da camada de dados (dedupe, busca, limite, limpeza de arquivos):
+
+```sh
+./Scripts/selfcheck.sh
+```
 
 ## Distribuicao fora da App Store
 
@@ -84,3 +118,4 @@ Isso copia o app para `/Applications/Kop.app`, remove quarentena, registra no La
 - `Kop/Core`: monitoramento, persistencia, preferencias e hotkey
 - `Kop/UI`: painel flutuante, lista, preview e preferencias
 - `Kop/Helpers`: thumbnails, icones, menu bar e automacao de paste
+- `Scripts/selfcheck`: checagem executavel da persistencia

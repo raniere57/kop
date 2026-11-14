@@ -17,6 +17,7 @@
 		A00000000000000000000008 /* ClipboardHistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000028 /* ClipboardHistoryViewModel.swift */; };
 		A00000000000000000000009 /* PanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000029 /* PanelController.swift */; };
 		A0000000000000000000000A /* KopPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002A /* KopPanelView.swift */; };
+		A00000000000000000000F1A /* ImageLightboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000F2A /* ImageLightboxView.swift */; };
 		A0000000000000000000000B /* ClipboardItemRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002B /* ClipboardItemRow.swift */; };
 		A0000000000000000000000C /* SearchBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002C /* SearchBar.swift */; };
 		A0000000000000000000000D /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002D /* PreferencesView.swift */; };
@@ -42,6 +43,7 @@
 		A00000000000000000000028 /* ClipboardHistoryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardHistoryViewModel.swift; sourceTree = "<group>"; };
 		A00000000000000000000029 /* PanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelController.swift; sourceTree = "<group>"; };
 		A0000000000000000000002A /* KopPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KopPanelView.swift; sourceTree = "<group>"; };
+		A00000000000000000000F2A /* ImageLightboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageLightboxView.swift; sourceTree = "<group>"; };
 		A0000000000000000000002B /* ClipboardItemRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardItemRow.swift; sourceTree = "<group>"; };
 		A0000000000000000000002C /* SearchBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBar.swift; sourceTree = "<group>"; };
 		A0000000000000000000002D /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
@@ -125,6 +127,7 @@
 			children = (
 				A00000000000000000000029 /* PanelController.swift */,
 				A0000000000000000000002A /* KopPanelView.swift */,
+				A00000000000000000000F2A /* ImageLightboxView.swift */,
 				A0000000000000000000002B /* ClipboardItemRow.swift */,
 				A0000000000000000000002C /* SearchBar.swift */,
 				A0000000000000000000002D /* PreferencesView.swift */,
@@ -235,6 +238,7 @@
 				A00000000000000000000008 /* ClipboardHistoryViewModel.swift in Sources */,
 				A00000000000000000000009 /* PanelController.swift in Sources */,
 				A0000000000000000000000A /* KopPanelView.swift in Sources */,
+				A00000000000000000000F1A /* ImageLightboxView.swift in Sources */,
 				A0000000000000000000000B /* ClipboardItemRow.swift in Sources */,
 				A0000000000000000000000C /* SearchBar.swift in Sources */,
 				A0000000000000000000000D /* PreferencesView.swift in Sources */,

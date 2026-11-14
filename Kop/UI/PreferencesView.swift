@@ -1,33 +1,42 @@
-import Carbon
 import AppKit
+import Carbon
+import Combine
 import SwiftUI
 
 @MainActor
 final class PreferencesViewModel: ObservableObject {
-    var preferences: PreferencesStore
+    let preferences: PreferencesStore
     private let persistence: PersistenceManager
+    private var cancellables: Set<AnyCancellable> = []
 
     @Published var storageStats = StorageStats(totalItems: 0, totalSizeBytes: 0, oldestItemDate: nil)
+    @Published var accessibilityGranted = AccessibilityPermission.isGranted
 
     init(preferences: PreferencesStore, persistence: PersistenceManager = .shared) {
         self.preferences = preferences
         self.persistence = persistence
+
+        // Re-publish the store's changes so the form redraws.
+        preferences.objectWillChange
+            .sink { [weak self] in self?.objectWillChange.send() }
+            .store(in: &cancellables)
     }
 
-    func reloadStorageStats() {
+    func refresh() {
         storageStats = persistence.fetchStorageStats()
+        accessibilityGranted = AccessibilityPermission.isGranted
     }
 
     func clearItemsOlderThan(days: Int) {
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         persistence.deleteItemsOlderThan(cutoff)
-        reloadStorageStats()
+        refresh()
         NotificationCenter.default.post(name: .clipboardHistoryChanged, object: nil)
     }
 
     func clearAllExceptFavorites() {
         persistence.clearNonFavoriteItems()
-        reloadStorageStats()
+        refresh()
         NotificationCenter.default.post(name: .clipboardHistoryChanged, object: nil)
     }
 }
@@ -36,75 +45,153 @@ struct PreferencesView: View {
     @ObservedObject var viewModel: PreferencesViewModel
     @State private var selectedTab = 0
 
+    private var preferences: PreferencesStore { viewModel.preferences }
+
     var body: some View {
         TabView(selection: $selectedTab) {
-            Form {
-                Picker("Limite do histórico", selection: $viewModel.preferences.historyLimitSelection) {
-                    Text("50").tag(50)
-                    Text("200").tag(200)
-                    Text("500").tag(500)
+            generalTab
+                .tabItem { Label("Geral", systemImage: "gearshape") }
+                .tag(0)
+
+            captureTab
+                .tabItem { Label("Captura", systemImage: "doc.on.clipboard") }
+                .tag(1)
+
+            StoragePreferencesTab(
+                stats: viewModel.storageStats,
+                clear7Days: {
+                    confirmAndRun(title: "Limpar itens com mais de 7 dias?", message: "Favoritos são mantidos.") {
+                        viewModel.clearItemsOlderThan(days: 7)
+                    }
+                },
+                clear30Days: {
+                    confirmAndRun(title: "Limpar itens com mais de 30 dias?", message: "Favoritos são mantidos.") {
+                        viewModel.clearItemsOlderThan(days: 30)
+                    }
+                },
+                clearAll: {
+                    confirmAndRun(title: "Limpar tudo?", message: "Todos os itens não favoritados serão removidos.") {
+                        viewModel.clearAllExceptFavorites()
+                    }
+                }
+            )
+            .tabItem { Label("Armazenamento", systemImage: "internaldrive") }
+            .tag(2)
+        }
+        .frame(width: 460, height: 400)
+        .onAppear { viewModel.refresh() }
+        .background(PreferencesWindowConfigurator())
+    }
+
+    private var generalTab: some View {
+        Form {
+            Section {
+                HStack {
+                    Text("Atalho global")
+                    Spacer()
+                    HotkeyRecorderView(shortcut: Binding(
+                        get: { preferences.hotkey },
+                        set: { preferences.hotkey = $0 }
+                    ))
+                    Button("Restaurar") { preferences.hotkey = .default }
+                }
+                Toggle("Iniciar com o sistema", isOn: Binding(
+                    get: { preferences.launchAtLogin },
+                    set: { preferences.launchAtLogin = $0 }
+                ))
+            }
+
+            Section {
+                Toggle("Colar automaticamente ao escolher um item", isOn: Binding(
+                    get: { preferences.pasteOnSelect },
+                    set: { preferences.pasteOnSelect = $0 }
+                ))
+                if preferences.pasteOnSelect && !viewModel.accessibilityGranted {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("Requer permissão de Acessibilidade.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Autorizar") {
+                            AccessibilityPermission.ensureGranted()
+                            viewModel.refresh()
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            } footer: {
+                Text("Sem essa opção, o item é apenas copiado e você cola com ⌘V.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Picker("Tema", selection: Binding(
+                    get: { preferences.theme },
+                    set: { preferences.theme = $0 }
+                )) {
+                    ForEach(KopTheme.allCases) { theme in
+                        Text(theme.title).tag(theme)
+                    }
+                }
+                Picker("Som ao copiar", selection: Binding(
+                    get: { preferences.soundName },
+                    set: { preferences.soundName = $0; $0.play() }
+                )) {
+                    ForEach(KopSound.allCases) { sound in
+                        Text(sound.title).tag(sound)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var captureTab: some View {
+        Form {
+            Section {
+                Picker("Limite do histórico", selection: Binding(
+                    get: { preferences.historyLimitSelection },
+                    set: { preferences.historyLimitSelection = $0 }
+                )) {
+                    Text("50 itens").tag(50)
+                    Text("200 itens").tag(200)
+                    Text("500 itens").tag(500)
+                    Text("2000 itens").tag(2000)
                     Text("Ilimitado").tag(0)
                 }
-                Toggle("Capturar imagens", isOn: $viewModel.preferences.captureImagesEnabled)
-                Toggle("Capturar arquivos", isOn: $viewModel.preferences.captureFilesEnabled)
-                Toggle("Iniciar com o sistema", isOn: $viewModel.preferences.launchAtLogin)
-                Picker("Tema", selection: $viewModel.preferences.theme) {
-                    Text("Automático").tag(KopTheme.system)
-                    Text("Claro").tag(KopTheme.light)
-                    Text("Escuro").tag(KopTheme.dark)
-                }
-                Picker("Itens sensíveis", selection: $viewModel.preferences.sensitiveCaptureBehavior) {
+                Toggle("Capturar imagens", isOn: Binding(
+                    get: { preferences.captureImagesEnabled },
+                    set: { preferences.captureImagesEnabled = $0 }
+                ))
+                Toggle("Capturar arquivos", isOn: Binding(
+                    get: { preferences.captureFilesEnabled },
+                    set: { preferences.captureFilesEnabled = $0 }
+                ))
+            } footer: {
+                Text("Favoritos nunca são removidos pelo limite.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Picker("Itens de apps sensíveis", selection: Binding(
+                    get: { preferences.sensitiveCaptureBehavior },
+                    set: { preferences.sensitiveCaptureBehavior = $0 }
+                )) {
                     ForEach(SensitiveCaptureBehavior.allCases) { behavior in
                         Text(behavior.title).tag(behavior)
                     }
                 }
-                HStack {
-                    Text("Atalho global")
-                    Spacer()
-                    HotkeyRecorderView(shortcut: $viewModel.preferences.hotkey)
-                    Button("Restaurar") {
-                        viewModel.preferences.hotkey = .default
-                    }
-                }
+            } footer: {
+                Text("Conteúdo marcado como confidencial (gerenciadores de senha) é sempre ignorado.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
-            .formStyle(.grouped)
-            .padding()
-            .tabItem {
-                Text("Geral")
-            }
-            .tag(0)
-
-            StoragePreferencesTab(
-                stats: viewModel.storageStats,
-                clear7Days: { confirmAndRun(
-                    title: "Limpar itens mais antigos que 7 dias?",
-                    message: "Itens favoritos serão mantidos."
-                ) {
-                    viewModel.clearItemsOlderThan(days: 7)
-                } },
-                clear30Days: { confirmAndRun(
-                    title: "Limpar itens mais antigos que 30 dias?",
-                    message: "Itens favoritos serão mantidos."
-                ) {
-                    viewModel.clearItemsOlderThan(days: 30)
-                } },
-                clearAll: { confirmAndRun(
-                    title: "Limpar tudo?",
-                    message: "Todos os itens não favoritados serão removidos."
-                ) {
-                    viewModel.clearAllExceptFavorites()
-                } }
-            )
-            .padding()
-            .tabItem {
-                Text("Armazenamento")
-            }
-            .tag(1)
         }
-        .onAppear {
-            viewModel.reloadStorageStats()
-        }
-        .background(PreferencesWindowConfigurator())
+        .formStyle(.grouped)
     }
 
     private func confirmAndRun(title: String, message: String, action: () -> Void) {
@@ -127,101 +214,154 @@ private struct StoragePreferencesTab: View {
     let clearAll: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             GroupBox {
-                VStack(alignment: .leading, spacing: 12) {
-                    statRow(title: "Total de itens copiados", value: "\(stats.totalItems) itens")
-                    statRow(title: "Espaço ocupado", value: ByteCountFormatter.string(fromByteCount: stats.totalSizeBytes, countStyle: .file))
-                    statRow(title: "Item mais antigo", value: oldestItemText)
-                }
-            }
-            GroupBox("Limpeza") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Button("Limpar itens mais antigos que 7 dias", action: clear7Days)
-                    Button("Limpar itens mais antigos que 30 dias", action: clear30Days)
-                    Button("Limpar tudo (exceto favoritos)", role: .destructive, action: clearAll)
+                    statRow("Itens no histórico", "\(stats.totalItems)")
+                    Divider()
+                    statRow("Espaço ocupado", ByteCountFormatter.string(fromByteCount: stats.totalSizeBytes, countStyle: .file))
+                    Divider()
+                    statRow("Item mais antigo", oldestItemText)
+                }
+                .padding(6)
+            }
+
+            GroupBox("Limpeza") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button("Limpar itens com mais de 7 dias", action: clear7Days)
+                    Button("Limpar itens com mais de 30 dias", action: clear30Days)
+                    Button("Limpar tudo (exceto favoritos)", action: clearAll)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(6)
             }
+
             Spacer()
         }
+        .padding(20)
     }
 
     private var oldestItemText: String {
-        guard let date = stats.oldestItemDate else { return "Sem itens" }
-        return "Desde \(date.formatted(.dateTime.day().month(.wide).year()))"
+        guard let date = stats.oldestItemDate else { return "—" }
+        return date.formatted(.dateTime.day().month(.wide).year())
     }
 
-    private func statRow(title: String, value: String) -> some View {
+    private func statRow(_ title: String, _ value: String) -> some View {
         HStack {
             Text(title)
             Spacer()
-            Text(value)
-                .foregroundStyle(.secondary)
+            Text(value).foregroundStyle(.secondary)
         }
     }
 }
+
+// MARK: - Hotkey recorder
 
 private struct HotkeyRecorderView: NSViewRepresentable {
     @Binding var shortcut: HotkeyShortcut
 
-    func makeNSView(context: Context) -> HotkeyRecorderTextField {
-        let field = HotkeyRecorderTextField()
-        field.placeholderString = "Pressione um atalho"
-        field.alignment = .center
-        field.delegate = context.coordinator
-        field.stringValue = shortcut.displayString
-        return field
+    func makeNSView(context: Context) -> HotkeyRecorderNSView {
+        let view = HotkeyRecorderNSView()
+        view.shortcut = shortcut
+        view.onChange = { shortcut = $0 }
+        return view
     }
 
-    func updateNSView(_ nsView: HotkeyRecorderTextField, context: Context) {
-        nsView.stringValue = shortcut.displayString
-        context.coordinator.shortcut = $shortcut
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(shortcut: $shortcut)
-    }
-
-    final class Coordinator: NSObject, NSTextFieldDelegate {
-        var shortcut: Binding<HotkeyShortcut>
-
-        init(shortcut: Binding<HotkeyShortcut>) {
-            self.shortcut = shortcut
-        }
-
-        func controlTextDidBeginEditing(_ obj: Notification) {
-            guard let field = obj.object as? HotkeyRecorderTextField else { return }
-            field.stringValue = "Aguardando..."
-        }
-
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            false
+    func updateNSView(_ nsView: HotkeyRecorderNSView, context: Context) {
+        nsView.onChange = { shortcut = $0 }
+        if !nsView.isRecording {
+            nsView.shortcut = shortcut
         }
     }
 }
 
-private final class HotkeyRecorderTextField: NSTextField {
+/// Click to record, then press any combination containing at least one
+/// modifier. Escape cancels.
+final class HotkeyRecorderNSView: NSView {
+    var onChange: ((HotkeyShortcut) -> Void)?
+
+    var shortcut: HotkeyShortcut = .default {
+        didSet { updateLabel() }
+    }
+
+    private(set) var isRecording = false {
+        didSet { updateLabel() }
+    }
+
+    private let label = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.borderWidth = 1
+        label.alignment = .center
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 110),
+            heightAnchor.constraint(equalToConstant: 24)
+        ])
+        updateLabel()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override var acceptsFirstResponder: Bool { true }
+    override var intrinsicContentSize: NSSize { NSSize(width: 110, height: 24) }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        isRecording = true
+    }
+
+    override func resignFirstResponder() -> Bool {
+        isRecording = false
+        return true
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.option) else {
-            return false
+        guard isRecording else { return false }
+        return capture(event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isRecording, capture(event) else {
+            super.keyDown(with: event)
+            return
         }
+    }
+
+    private func capture(_ event: NSEvent) -> Bool {
+        if event.keyCode == 53 { // Esc cancels
+            isRecording = false
+            window?.makeFirstResponder(nil)
+            return true
+        }
+
         let modifiers = carbonModifiers(from: event.modifierFlags)
-        let updated = HotkeyShortcut(keyCode: UInt32(event.keyCode), modifiers: modifiers)
-
-        if let delegate = delegate as? HotkeyRecorderView.Coordinator {
-            delegate.shortcut.wrappedValue = updated
+        let candidate = HotkeyShortcut(keyCode: UInt32(event.keyCode), modifiers: modifiers)
+        guard candidate.hasModifier else {
+            NSSound.beep()
+            return true
         }
 
-        stringValue = updated.displayString
-        abortEditing()
+        shortcut = candidate
+        onChange?(candidate)
+        isRecording = false
         window?.makeFirstResponder(nil)
         return true
     }
 
-    override func becomeFirstResponder() -> Bool {
-        stringValue = "Aguardando..."
-        return super.becomeFirstResponder()
+    private func updateLabel() {
+        label.stringValue = isRecording ? "Pressione…" : shortcut.displayString
+        label.textColor = isRecording ? .secondaryLabelColor : .labelColor
+        layer?.borderColor = (isRecording ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.6).cgColor
     }
 
     private func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
@@ -243,9 +383,5 @@ private struct PreferencesWindowConfigurator: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            nsView.window?.identifier = NSUserInterfaceItemIdentifier("preferencesWindow")
-        }
-    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
