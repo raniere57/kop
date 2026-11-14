@@ -16,14 +16,24 @@ Kop e um gerenciador de area de transferencia nativo para macOS, feito em SwiftU
 | `Cmd + Delete` | apagar item |
 | `Esc` | fechar |
 
+## Instalar
+
+1. Baixe o `Kop-<versao>.dmg` em [Releases](https://github.com/raniere57/kop/releases/latest).
+2. Arraste `Kop.app` para `Applications`.
+3. O app nao e notarizado. Na primeira vez, libere a quarentena:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Kop.app
+```
+
 ## Requisitos
 
 - macOS 13 Ventura ou superior
-- Xcode 15 ou superior
+- Xcode 15 ou superior (apenas para compilar)
 
 ## Build
 
-1. Abra [Kop.xcodeproj](/Users/raniere/Dev/kop/Kop.xcodeproj) no Xcode.
+1. Abra `Kop.xcodeproj` no Xcode.
 2. Selecione o target `Kop`.
 3. Rode o app com `Cmd + R`.
 
@@ -46,7 +56,7 @@ Saida esperada:
 
 - App Release em `.derived/Build/Products/Release/Kop.app`
 - DMG final em `dist/Kop.dmg`
-- DMG aberto automaticamente no Finder
+- DMG aberto automaticamente no Finder (quando rodado em um terminal interativo)
 - Janela pronta para arrastar `Kop.app` para `Applications`
 
 O DMG gerado inclui:

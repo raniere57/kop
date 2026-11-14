@@ -68,6 +68,9 @@ echo
 echo "DMG created at:"
 echo "  $DMG_PATH"
 
-echo
-echo "Opening DMG..."
-open "$DMG_PATH"
+# Only pop the DMG open for a person at a terminal, not for a scripted release.
+if [[ -t 1 ]]; then
+  echo
+  echo "Opening DMG..."
+  open "$DMG_PATH"
+fi
