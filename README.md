@@ -13,7 +13,7 @@ Kop e um gerenciador de area de transferencia nativo para macOS, feito em SwiftU
 | `Cmd + 1` … `Cmd + 9` | usar direto o item da posicao |
 | `Cmd + D` | favoritar / desfavoritar |
 | `Cmd + Y` | visualizar |
-| `Cmd + Delete` | apagar item |
+| `Cmd + Delete` | apagar item (com a busca vazia; favoritos nao sao apagados pelo atalho) |
 | `Esc` | fechar |
 
 ## Instalar

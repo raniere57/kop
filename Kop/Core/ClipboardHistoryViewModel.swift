@@ -34,6 +34,9 @@ final class ClipboardHistoryViewModel: ObservableObject {
     /// Decoded together with `expandedItem` (same update), so the lightbox
     /// never renders a frame without an image. Released on collapse.
     @Published private(set) var expandedImage: NSImage?
+    /// True while the store is rebuilding or compacting; the list shows a
+    /// notice instead of blocking the main thread on the database.
+    @Published private(set) var isStorageBusy = false
 
     private let persistence: PersistenceManager
     private let preferences: PreferencesStore
@@ -95,6 +98,13 @@ final class ClipboardHistoryViewModel: ObservableObject {
     /// other reload (capture, favorite, rename, delete while visible)
     /// refetches everything already loaded so the user keeps their place.
     func reload(searchTerm: String? = nil, filter: ClipboardListFilter? = nil, fromTop: Bool = false) {
+        isStorageBusy = persistence.isBusy
+        guard !isStorageBusy else {
+            items = []
+            hasMore = false
+            selectedItemID = nil
+            return
+        }
         let isNewQuery = fromTop || searchTerm != nil || filter != nil
         let limit = isNewQuery ? pageSize : max(items.count, pageSize)
         let freshItems = fetchPage(
@@ -116,7 +126,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     func loadMoreIfNeeded(currentItem: ClipboardEntry) {
-        guard hasMore, currentItem.id == items.last?.id else { return }
+        guard hasMore, currentItem.id == items.last?.id, !persistence.isBusy else { return }
         let nextPage = fetchPage(offset: items.count, limit: pageSize, searchTerm: searchText, filter: listFilter)
         hasMore = nextPage.count == pageSize
         items.append(contentsOf: nextPage)
@@ -178,6 +188,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
         // nothing rather than cut text.
         guard let resolved = resolvedItemForCopy(item) else {
             NSSound.beep()
+            collapse()
             reload()
             return
         }
@@ -355,6 +366,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     var emptyStateTitle: String {
+        if isStorageBusy { return "Otimizando o histórico…" }
         if listFilter == .favorites {
             return isSearching ? "Nenhum favorito encontrado" : "Nenhum favorito salvo"
         }
@@ -362,6 +374,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
     }
 
     var emptyStateMessage: String {
+        if isStorageBusy { return "Leva alguns segundos. A lista volta sozinha quando terminar." }
         if listFilter == .favorites {
             return "Favorite itens importantes para encontrá-los mais rápido."
         }
@@ -393,6 +406,7 @@ final class ClipboardHistoryViewModel: ObservableObject {
     /// type is re-read in full before it reaches the pasteboard.
     /// Nil when the row is gone or unreadable.
     private func resolvedItemForCopy(_ item: ClipboardEntry) -> ClipboardEntry? {
-        persistence.fetchItem(id: item.id)
+        guard !persistence.isBusy else { return nil }
+        return persistence.fetchItem(id: item.id)
     }
 }

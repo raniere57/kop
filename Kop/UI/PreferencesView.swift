@@ -38,7 +38,8 @@ final class PreferencesViewModel: ObservableObject {
         NotificationCenter.default.publisher(for: .clipboardHistoryChanged)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                guard let self, self.isWindowVisible else { return }
+                // A cleanup holds the database for seconds and refreshes when done.
+                guard let self, self.isWindowVisible, !self.isCleaning else { return }
                 self.refresh()
             }
             .store(in: &cancellables)
@@ -48,8 +49,11 @@ final class PreferencesViewModel: ObservableObject {
     var isWindowVisible = false
 
     func refresh() {
-        storageStats = persistence.fetchStorageStats()
         accessibilityGranted = AccessibilityPermission.isGranted
+        // While the store is busy the stats arrive with the notification it
+        // posts when done, instead of blocking the main thread here.
+        guard !persistence.isBusy else { return }
+        storageStats = persistence.fetchStorageStats()
     }
 
     func clearItemsOlderThan(days: Int) {
@@ -270,7 +274,7 @@ private struct StoragePreferencesTab: View {
                     HStack(spacing: 8) {
                         Button("Limpar tudo (exceto favoritos)", action: clearAll)
                         if isCleaning {
-                            ProgressView().controlSize(.small)
+                            ProgressView().controlSize(.small).accessibilityLabel("Limpando histórico")
                         }
                     }
                 }

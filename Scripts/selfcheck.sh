@@ -7,5 +7,6 @@ swiftc -O -o "$OUT" \
     Kop/Core/ClipboardItem.swift \
     Kop/Core/PersistenceManager.swift \
     Kop/Helpers/ImageThumbnail.swift \
+    Kop/Helpers/Notifications.swift \
     Scripts/selfcheck/main.swift
 "$OUT"

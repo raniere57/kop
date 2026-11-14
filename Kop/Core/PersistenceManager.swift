@@ -59,6 +59,18 @@ final class PersistenceManager {
     /// False when the database could not be opened, so nothing is being saved.
     var isAvailable: Bool { db != nil }
 
+    /// True while a schema rebuild or VACUUM holds the queue for seconds.
+    /// Main-thread callers check it instead of blocking on `queue.sync`;
+    /// `.clipboardHistoryChanged` is posted when the work is done.
+    var isBusy: Bool {
+        busyLock.lock()
+        defer { busyLock.unlock() }
+        return busy
+    }
+
+    private let busyLock = NSLock()
+    private var busy = false
+
     private let dbURL: URL
     /// Kop-owned file folders next to this database (KopStorage's folders for
     /// the shared instance, sandboxed ones in the self-check).
@@ -75,9 +87,21 @@ final class PersistenceManager {
         configureConnection()
         // Serial queue: every later call waits behind the schema work, and app
         // launch is not blocked by rebuilding a large history.
+        setBusy(true)
         queue.async {
             self.prepareSchemaInternal()
             self.sweepOrphanFilesInternal()
+            self.setBusy(false)
+        }
+    }
+
+    private func setBusy(_ value: Bool) {
+        busyLock.lock()
+        busy = value
+        busyLock.unlock()
+        guard !value else { return }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .clipboardHistoryChanged, object: nil)
         }
     }
 
@@ -156,6 +180,8 @@ final class PersistenceManager {
     }
 
     func clearNonFavoriteItems() {
+        setBusy(true)
+        defer { setBusy(false) }
         queue.sync {
             let orphans = filePathsInternal(where: "is_favorite = 0", bind: nil)
             runInternal("DELETE FROM clipboard_items WHERE is_favorite = 0;", bind: nil)
@@ -165,6 +191,8 @@ final class PersistenceManager {
     }
 
     func deleteItemsOlderThan(_ date: Date) {
+        setBusy(true)
+        defer { setBusy(false) }
         queue.sync {
             let orphans = filePathsInternal(where: "is_favorite = 0 AND updated_at < ?") { statement in
                 sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
@@ -296,7 +324,12 @@ final class PersistenceManager {
         for pragma in [
             "PRAGMA journal_mode = WAL;",
             "PRAGMA synchronous = NORMAL;",
-            "PRAGMA busy_timeout = 3000;"
+            "PRAGMA busy_timeout = 3000;",
+            // Keep the page cache at 2 MB and spill early: the system default
+            // spills only after 20,000 pages, so a VACUUM or the schema
+            // rebuild would hold ~180 MB in memory.
+            "PRAGMA cache_size = -2000;",
+            "PRAGMA cache_spill = 500;"
         ] {
             _ = sqlite3_exec(db, pragma, nil, nil, nil)
         }
@@ -450,7 +483,9 @@ final class PersistenceManager {
     /// Removes files no row references, e.g. PNGs exported when an inline image
     /// is copied back out. Recent files stay: one may still be on the pasteboard.
     private func sweepOrphanFilesInternal() {
-        guard db != nil else { return }
+        // Referenced paths are read first so the age check sits right next to
+        // the removal: a file reused (and touched) in the meantime is fresh.
+        guard db != nil, let referenced = referencedPathsInternal() else { return }
         let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
         let manager = FileManager.default
         let candidates = fileDirectories.flatMap { directory -> [String] in
@@ -460,7 +495,7 @@ final class PersistenceManager {
                 return modified.map { $0 < cutoff } ?? false
             }
         }
-        purgeOrphanFilesInternal(candidates)
+        ImageThumbnail.shared.removeOrphanFiles(paths: candidates, stillReferenced: referenced, managedDirectories: fileDirectories)
     }
 
     /// Database, its WAL and Kop's file folders: what Kop really takes on disk.
@@ -487,7 +522,7 @@ final class PersistenceManager {
     }
 
     private func execute(_ sql: String, bind: @escaping (OpaquePointer?) -> Void) {
-        queue.sync { runInternal(sql, bind: bind) }
+        queue.sync { _ = runInternal(sql, bind: bind) }
     }
 
     @discardableResult

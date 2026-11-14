@@ -17,7 +17,11 @@ final class PreviewWindowController: NSWindowController, NSWindowDelegate {
 
     /// Reuses a single window so repeated previews do not stack up.
     func show(item: ClipboardEntry) {
-        let fullItem = PersistenceManager.shared.fetchItem(id: item.id) ?? item
+        // List rows are truncated previews; never present one as the whole item.
+        guard let fullItem = PersistenceManager.shared.fetchItem(id: item.id) else {
+            NSSound.beep()
+            return
+        }
         let hosting = NSHostingController(rootView: PreviewContentView(item: fullItem))
 
         let window = (self.window as? PreviewWindow) ?? makeWindow()

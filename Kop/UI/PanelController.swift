@@ -132,11 +132,10 @@ final class PanelController: NSWindowController, NSWindowDelegate {
 
     private func showPanel() {
         guard let panel = window as? NSPanel else { return }
-        // Kop's own windows can be frontmost here; keep the last real target.
-        if let frontmost = NSWorkspace.shared.frontmostApplication,
-           frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-            viewModel.pasteTargetApp = frontmost
-        }
+        // Opened over one of Kop's own windows there is no app to paste into;
+        // a target left from an earlier open would receive the paste instead.
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        viewModel.pasteTargetApp = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
         viewModel.isPanelVisible = true
         viewModel.reloadForShow()
         position(panel: panel)
