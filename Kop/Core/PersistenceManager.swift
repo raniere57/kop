@@ -17,6 +17,13 @@ source_app_name, source_bundle_id, created_at, updated_at, is_favorite, custom_t
 final class PersistenceManager {
     static let shared = PersistenceManager()
 
+    /// Rows fetched for the list (`includePayload: false`) carry at most this
+    /// many characters of text; fetch the row by id to get all of it.
+    static let listTextPreviewLength = 500
+
+    /// False when the database could not be opened, so nothing is being saved.
+    var isAvailable: Bool { db != nil }
+
     private let dbURL: URL
     private let queue = DispatchQueue(label: "kop.persistence.queue")
     private var db: OpaquePointer?
